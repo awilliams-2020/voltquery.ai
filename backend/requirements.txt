@@ -23,6 +23,7 @@ postgrest==0.13.0
 llama-index-core>=0.10.5,<0.11.0  # Pin version to avoid conflicts
 llama-index-llms-ollama  # May have httpx conflict but should work
 llama-index-llms-gemini
+llama-index-llms-openai
 llama-index-vector-stores-supabase
 llama-index-embeddings-openai
 llama-index-embeddings-ollama
@@ -33,4 +34,5 @@ llama-index-embeddings-ollama
 google-generativeai>=0.5.2
 stripe==7.0.0
 pillow>=10.2.0,<11.0.0  # Required by llama-index-llms-gemini
+openai>=1.0.0  # Required by llama-index-embeddings-openai
 

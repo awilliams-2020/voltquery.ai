@@ -9,8 +9,8 @@ from supabase import create_client, Client
 
 
 class VectorStoreSettings(BaseSettings):
-    supabase_url: str
-    supabase_key: str
+    supabase_url: str = ""  # Optional - only needed for Supabase REST API
+    supabase_key: str = ""  # Optional - only needed for Supabase REST API
     # Use SUPABASE_DB_URL, fallback to DATABASE_URL for compatibility
     supabase_db_url: str = ""
     database_url: str = ""
@@ -49,8 +49,10 @@ class VectorStoreService:
         self._embed_model: Optional[BaseEmbedding] = None
         self._index: Optional[VectorStoreIndex] = None
     
-    def get_supabase_client(self) -> Client:
-        """Get or create Supabase client."""
+    def get_supabase_client(self) -> Optional[Client]:
+        """Get or create Supabase client (optional - only needed for REST API operations)."""
+        if not self.settings.supabase_url or not self.settings.supabase_key:
+            return None  # Not available when using local PostgreSQL
         if self._supabase_client is None:
             self._supabase_client = create_client(
                 self.settings.supabase_url,
@@ -79,10 +81,10 @@ class VectorStoreService:
                         ) from e
                     raise
             else:
-                # Use OpenAI embeddings for cloud
+                # Use OpenAI embeddings for cloud (Gemini) or OpenAI mode
                 if not self.settings.openai_api_key:
                     raise ValueError(
-                        "OPENAI_API_KEY must be set when LLM_MODE=cloud"
+                        "OPENAI_API_KEY must be set when LLM_MODE=cloud or LLM_MODE=openai"
                     )
                 self._embed_model = OpenAIEmbedding(
                     api_key=self.settings.openai_api_key,

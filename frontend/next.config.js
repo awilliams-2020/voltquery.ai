@@ -1,12 +1,13 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // Enable standalone output for Docker
+  output: 'standalone',
   // Experimental: Allow async headers and suppress warnings
   experimental: {
     serverActions: {
       bodySizeLimit: '2mb',
     },
-    missingSuspenseWithCSRBailout: false,
   },
   // Suppress console warnings for known Next.js 15 + Clerk compatibility issues
   onDemandEntries: {

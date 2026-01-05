@@ -1,13 +1,22 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from app.routers import stations, llm, rag, stripe, history, electricity, urdb
+import os
 
 app = FastAPI(title="NREL RAG SaaS API", version="1.0.0")
 
-# Configure CORS
+# Configure CORS - allow frontend URL from environment variable
+frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
+# Allow both the configured frontend URL and localhost for development
+cors_origins = [
+    frontend_url,
+    "http://localhost:3000",  # Local development
+    "https://voltquery.ai",  # Production frontend
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # Next.js default port
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
