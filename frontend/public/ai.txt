@@ -35,8 +35,8 @@ Volt Query AI is an AI-powered RAG (Retrieval-Augmented Generation) SaaS applica
 - Method: Header-based (X-Clerk-User-Id, X-Clerk-Email)
 
 ## Rate Limits
-- Free tier: 10 queries/month
-- Pro tier: Unlimited queries
+- Free tier: 3 queries/month
+- Premium tier: Unlimited queries
 
 ## Contact
 - Website: https://voltquery.ai

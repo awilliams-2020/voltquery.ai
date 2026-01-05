@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings
 class StripeSettings(BaseSettings):
     stripe_secret_key: str
     stripe_webhook_secret: str
-    stripe_price_id: str  # Price ID for Pro plan
+    stripe_price_id: str  # Price ID for Premium plan
     
     class Config:
         env_file = ".env"
@@ -24,6 +24,7 @@ class StripeService:
         self,
         customer_id: Optional[str],
         user_email: str,
+        user_id: str,
         success_url: str,
         cancel_url: str
     ) -> Dict[str, Any]:
@@ -37,11 +38,17 @@ class StripeService:
             "mode": "subscription",
             "success_url": success_url,
             "cancel_url": cancel_url,
-            "customer_email": user_email,
+            "metadata": {
+                "user_id": user_id,
+            },
         }
         
+        # Stripe only allows one of: customer or customer_email
+        # Use customer if we have a customer_id, otherwise use customer_email
         if customer_id:
             session_params["customer"] = customer_id
+        else:
+            session_params["customer_email"] = user_email
         
         session = stripe.checkout.Session.create(**session_params)
         return {
@@ -56,6 +63,27 @@ class StripeService:
             return_url=return_url,
         )
         return {"url": session.url}
+    
+    def cancel_subscription(self, subscription_id: str) -> bool:
+        """Cancel a Stripe subscription."""
+        try:
+            stripe.Subscription.modify(
+                subscription_id,
+                cancel_at_period_end=True
+            )
+            return True
+        except stripe.error.StripeError as e:
+            # Subscription might already be canceled or not found
+            return False
+    
+    def delete_customer(self, customer_id: str) -> bool:
+        """Delete a Stripe customer."""
+        try:
+            stripe.Customer.delete(customer_id)
+            return True
+        except stripe.error.StripeError as e:
+            # Customer might already be deleted or not found
+            return False
     
     def verify_webhook(self, payload: bytes, signature: str) -> Dict[str, Any]:
         """Verify Stripe webhook signature."""

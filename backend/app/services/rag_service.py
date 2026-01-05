@@ -91,20 +91,27 @@ class RAGService:
         # Get vector store index
         index = self.vector_store_service.get_index()
         
-        # Add documents to index (this will embed and store them)
-        # Note: In production, you might want to check for duplicates
+        # Bulk insert documents (much faster than individual inserts)
+        # This allows the embedding model to process multiple texts in batch
         indexed_count = 0
         failed_count = 0
-        for doc in documents:
-            try:
-                index.insert(doc)
-                indexed_count += 1
-            except Exception as e:
-                failed_count += 1
-                print(f"Warning: Failed to insert document {doc.id_}: {str(e)}")
-                if failed_count <= 3:  # Print first few errors
-                    import traceback
-                    traceback.print_exc()
+        try:
+            # Bulk insert all documents at once for better performance
+            index.insert(documents)
+            indexed_count = len(documents)
+        except Exception as e:
+            # If bulk insert fails, fall back to individual inserts for error handling
+            print(f"Warning: Bulk insert failed, falling back to individual inserts: {str(e)}")
+            for doc in documents:
+                try:
+                    index.insert(doc)
+                    indexed_count += 1
+                except Exception as doc_error:
+                    failed_count += 1
+                    print(f"Warning: Failed to insert document {doc.id_}: {str(doc_error)}")
+                    if failed_count <= 3:  # Print first few errors
+                        import traceback
+                        traceback.print_exc()
         
         if failed_count > 0:
             print(f"Warning: {failed_count} out of {len(documents)} documents failed to index")
@@ -153,15 +160,22 @@ class RAGService:
         # Get vector store index
         index = self.vector_store_service.get_index()
         
-        # Add documents to index
+        # Bulk insert documents for better performance
         indexed_count = 0
-        for doc in documents:
-            try:
-                index.insert(doc)
-                indexed_count += 1
-            except Exception:
-                # Skip duplicates or errors
-                pass
+        try:
+            # Bulk insert all documents at once
+            index.insert(documents)
+            indexed_count = len(documents)
+        except Exception as e:
+            # If bulk insert fails, fall back to individual inserts
+            print(f"Warning: Bulk insert failed, falling back to individual inserts: {str(e)}")
+            for doc in documents:
+                try:
+                    index.insert(doc)
+                    indexed_count += 1
+                except Exception:
+                    # Skip duplicates or errors
+                    pass
         
         return {
             "state": state,
@@ -1294,6 +1308,12 @@ class RAGService:
                     answer_text = str(answer_text).strip()
                 except Exception:
                     answer_text = ""
+            
+            # Remove redundant "Response:" prefixes (e.g., "Response 1:", "Response:", etc.)
+            if isinstance(answer_text, str):
+                # Remove patterns like "Response 1:", "Response 2:", "Response:", etc.
+                answer_text = re.sub(r'^Response\s*\d*:\s*', '', answer_text, flags=re.IGNORECASE)
+                answer_text = answer_text.strip()
         else:
             answer_text = ""
         
@@ -1372,24 +1392,32 @@ class RAGService:
             # Get vector store index
             index = self.vector_store_service.get_index()
             
-            # Index documents
+            # Bulk insert documents for better performance
             indexed_count = 0
             failed_count = 0
-            for doc in documents:
-                try:
-                    index.insert(doc)
-                    indexed_count += 1
-                except Exception as e:
-                    failed_count += 1
-                    print(f"Warning: Failed to insert utility rate document {doc.id_}: {str(e)}")
-                    if failed_count <= 3:  # Print first few errors
-                        import traceback
-                        traceback.print_exc()
-            
-            if failed_count > 0:
-                print(f"Warning: {failed_count} out of {len(documents)} utility rate documents failed to index")
-            else:
-                print(f"Successfully indexed {indexed_count} utility rate documents for location {location}")
+            try:
+                # Bulk insert all documents at once
+                index.insert(documents)
+                indexed_count = len(documents)
+                print(f"Successfully bulk indexed {indexed_count} utility rate documents for location {location}")
+            except Exception as e:
+                # If bulk insert fails, fall back to individual inserts for error handling
+                print(f"Warning: Bulk insert failed, falling back to individual inserts: {str(e)}")
+                for doc in documents:
+                    try:
+                        index.insert(doc)
+                        indexed_count += 1
+                    except Exception as doc_error:
+                        failed_count += 1
+                        print(f"Warning: Failed to insert utility rate document {doc.id_}: {str(doc_error)}")
+                        if failed_count <= 3:  # Print first few errors
+                            import traceback
+                            traceback.print_exc()
+                
+                if failed_count > 0:
+                    print(f"Warning: {failed_count} out of {len(documents)} utility rate documents failed to index")
+                else:
+                    print(f"Successfully indexed {indexed_count} utility rate documents for location {location}")
         except Exception as e:
             # Don't fail silently - log the error
             print(f"Error indexing utility rates: {str(e)}")
@@ -1561,14 +1589,21 @@ class RAGService:
             # Convert to Documents
             documents = self.document_service.stations_to_documents(batch)
             
-            # Index documents
-            for doc in documents:
-                try:
-                    index.insert(doc)
-                    indexed_count += 1
-                except Exception:
-                    # Skip duplicates or errors
-                    skipped_count += 1
+            # Bulk insert documents for better performance
+            try:
+                # Bulk insert entire batch at once
+                index.insert(documents)
+                indexed_count += len(documents)
+            except Exception as e:
+                # If bulk insert fails, fall back to individual inserts for error handling
+                print(f"Warning: Bulk insert failed for batch, falling back to individual inserts: {str(e)}")
+                for doc in documents:
+                    try:
+                        index.insert(doc)
+                        indexed_count += 1
+                    except Exception:
+                        # Skip duplicates or errors
+                        skipped_count += 1
         
         return {
             "state": state,

@@ -22,6 +22,10 @@ CREATE TABLE IF NOT EXISTS energy_documents (
 );
 
 -- Create index for vector similarity search
+-- Note: This creates a pgvector index. The vecs library (used by SupabaseVectorStore)
+-- also expects its own index format. Run scripts/create_vecs_index.py after running this migration
+-- to create the vecs index and eliminate the warning:
+-- "Query does not have a covering index for IndexMeasure.cosine_distance"
 CREATE INDEX IF NOT EXISTS energy_documents_embedding_idx ON energy_documents 
 USING ivfflat (embedding vector_cosine_ops)
 WITH (lists = 100);

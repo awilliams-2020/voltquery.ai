@@ -1,6 +1,6 @@
 "use client"
 
-import { AlertCircle, Zap } from "lucide-react"
+import { AlertCircle, Zap, Loader2 } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 
@@ -9,6 +9,7 @@ interface QueryLimitBannerProps {
   queryLimit: number
   plan: string
   onUpgrade?: () => void
+  upgradeLoading?: boolean
 }
 
 export function QueryLimitBanner({
@@ -16,15 +17,19 @@ export function QueryLimitBanner({
   queryLimit,
   plan,
   onUpgrade,
+  upgradeLoading = false,
 }: QueryLimitBannerProps) {
+  const isPremium = plan === "premium"
+  
+  // Don't show banner for premium users
+  if (isPremium) {
+    return null
+  }
+
   const remaining = queryLimit - queriesUsed
   const percentage = (queriesUsed / queryLimit) * 100
   const isNearLimit = percentage >= 80
   const isAtLimit = remaining === 0
-
-  if (plan !== "free") {
-    return null
-  }
 
   return (
     <Card className={`mb-6 ${isAtLimit ? "border-destructive" : isNearLimit ? "border-yellow-500" : ""}`}>
@@ -43,7 +48,7 @@ export function QueryLimitBanner({
                   : `${remaining} query${remaining !== 1 ? "s" : ""} remaining`}
               </p>
               <p className="text-sm text-muted-foreground">
-                {queriesUsed} of {queryLimit} queries used this period
+                {queriesUsed} of {queryLimit} queries used this month
               </p>
             </div>
           </div>
@@ -61,8 +66,15 @@ export function QueryLimitBanner({
               />
             </div>
             {onUpgrade && (
-              <Button onClick={onUpgrade} size="sm">
-                Upgrade
+              <Button onClick={onUpgrade} size="sm" disabled={upgradeLoading}>
+                {upgradeLoading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Loading...
+                  </>
+                ) : (
+                  "Upgrade"
+                )}
               </Button>
             )}
           </div>

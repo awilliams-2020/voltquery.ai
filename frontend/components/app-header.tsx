@@ -2,7 +2,7 @@
 
 import { useUser, UserButton } from "@clerk/nextjs"
 import Link from "next/link"
-import { Zap, History } from "lucide-react"
+import { Zap, History, CreditCard } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
 export function AppHeader() {
@@ -26,6 +26,12 @@ export function AppHeader() {
                   <Button variant="ghost" className="gap-2">
                     <History className="h-4 w-4" />
                     History
+                  </Button>
+                </Link>
+                <Link href="/subscription">
+                  <Button variant="ghost" className="gap-2">
+                    <CreditCard className="h-4 w-4" />
+                    Subscription
                   </Button>
                 </Link>
                 <UserButton 

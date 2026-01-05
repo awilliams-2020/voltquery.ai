@@ -1,0 +1,16 @@
+import { NextResponse } from 'next/server'
+
+export const runtime = 'edge'
+
+export async function GET() {
+  const svgContent = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+</svg>`
+  
+  return new NextResponse(svgContent, {
+    headers: {
+      'Content-Type': 'image/svg+xml',
+      'Cache-Control': 'public, max-age=31536000, immutable',
+    },
+  })
+}

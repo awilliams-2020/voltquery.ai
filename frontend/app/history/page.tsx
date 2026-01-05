@@ -1,7 +1,7 @@
 "use client"
 
 import React from "react"
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { useUser } from "@clerk/nextjs"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { History, Calendar, MapPin } from "lucide-react"
@@ -22,13 +22,7 @@ export default function HistoryPage() {
   const [queries, setQueries] = useState<QueryHistoryItem[]>([])
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    if (user) {
-      fetchHistory()
-    }
-  }, [user])
-
-  const fetchHistory = async () => {
+  const fetchHistory = useCallback(async () => {
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
       const response = await fetch(`${apiUrl}/api/history/queries`, {
@@ -46,7 +40,13 @@ export default function HistoryPage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [user?.id, user?.primaryEmailAddress?.emailAddress])
+
+  useEffect(() => {
+    if (user) {
+      fetchHistory()
+    }
+  }, [user, fetchHistory])
 
   return (
     <div className="min-h-screen">

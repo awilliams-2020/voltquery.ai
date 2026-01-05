@@ -78,8 +78,8 @@ export async function GET() {
       "NREL REopt API"
     ],
     "rateLimits": {
-      "free": "10 queries/month",
-      "pro": "Unlimited queries"
+      "free": "3 queries/month",
+      "premium": "Unlimited queries"
     }
   }
 

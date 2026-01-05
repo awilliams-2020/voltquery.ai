@@ -140,28 +140,51 @@ async def bulk_index_state(
             # Convert to documents
             documents = document_service.stations_to_documents(batch)
             
-            # Index documents
-            for doc in documents:
-                try:
-                    index.insert(doc)
-                    indexed_count += 1
-                except ValueError as e:
-                    # Model not found errors should have been caught earlier, but handle gracefully
-                    error_msg = str(e)
-                    if "not found" in error_msg.lower() or "404" in error_msg:
-                        print(f"   ❌ Critical error: {error_msg}")
-                        print(f"   💡 Please pull the embedding model: ollama pull nomic-embed-text")
-                        return
-                    skipped_count += 1
-                    if skipped_count <= 5:  # Only print first few errors
-                        print(f"   ⚠️  Skipped station: {str(e)[:100]}")
-                except Exception as e:
-                    # Skip duplicates or other errors
-                    skipped_count += 1
-                    if skipped_count <= 5:  # Only print first few errors
-                        print(f"   ⚠️  Skipped station: {str(e)[:100]}")
+            # Bulk insert documents for better performance
+            # This allows the embedding model to process multiple texts in batch
+            try:
+                # Bulk insert entire batch at once
+                index.insert(documents)
+                indexed_count += len(documents)
+                print(f"   ✅ Bulk indexed {len(documents)} stations (Total: {indexed_count}/{total_stations})")
+            except ValueError as e:
+                # Model not found errors should have been caught earlier, but handle gracefully
+                error_msg = str(e)
+                if "not found" in error_msg.lower() or "404" in error_msg:
+                    print(f"   ❌ Critical error: {error_msg}")
+                    print(f"   💡 Please pull the embedding model: ollama pull nomic-embed-text")
+                    return
+                # If bulk insert fails, fall back to individual inserts
+                print(f"   ⚠️  Bulk insert failed, falling back to individual inserts: {str(e)[:100]}")
+                for doc in documents:
+                    try:
+                        index.insert(doc)
+                        indexed_count += 1
+                    except ValueError as doc_e:
+                        error_msg = str(doc_e)
+                        if "not found" in error_msg.lower() or "404" in error_msg:
+                            print(f"   ❌ Critical error: {error_msg}")
+                            print(f"   💡 Please pull the embedding model: ollama pull nomic-embed-text")
+                            return
+                        skipped_count += 1
+                        if skipped_count <= 5:  # Only print first few errors
+                            print(f"   ⚠️  Skipped station: {str(doc_e)[:100]}")
+                    except Exception as doc_e:
+                        skipped_count += 1
+                        if skipped_count <= 5:  # Only print first few errors
+                            print(f"   ⚠️  Skipped station: {str(doc_e)[:100]}")
+            except Exception as e:
+                # If bulk insert fails with other error, fall back to individual inserts
+                print(f"   ⚠️  Bulk insert failed, falling back to individual inserts: {str(e)[:100]}")
+                for doc in documents:
+                    try:
+                        index.insert(doc)
+                        indexed_count += 1
+                    except Exception as doc_e:
+                        skipped_count += 1
+                        if skipped_count <= 5:  # Only print first few errors
+                            print(f"   ⚠️  Skipped station: {str(doc_e)[:100]}")
             
-            print(f"   ✅ Indexed {len(documents)} stations (Total: {indexed_count}/{total_stations})")
             print()
             
         except Exception as e:

@@ -62,7 +62,7 @@ cp .env.example .env
    - `CLERK_SECRET_KEY`: Your Clerk secret key
    - `STRIPE_SECRET_KEY`: Your Stripe secret key
    - `STRIPE_WEBHOOK_SECRET`: Your Stripe webhook secret
-   - `STRIPE_PRICE_ID`: Your Stripe price ID for Pro plan
+   - `STRIPE_PRICE_ID`: Your Stripe price ID for Premium plan
    - `FRONTEND_URL`: Frontend URL (default: http://localhost:3000)
 
 3. **Set up Supabase Vector Database**:

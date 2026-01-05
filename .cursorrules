@@ -124,8 +124,8 @@ You are an expert Senior Fullstack Engineer specializing in Next.js 15, FastAPI,
 ## Payments
 - Stripe integration for subscriptions
 - Webhook handling for subscription events
-- Free tier: 10 queries/month
-- Pro tier: Unlimited queries (configurable via Stripe price ID)
+- Free tier: 3 queries/month
+- Premium tier: Unlimited queries (configurable via Stripe price ID)
 
 # File Naming Conventions
 - Python: snake_case (e.g., `rag_service.py`, `nrel_client.py`)

@@ -33,6 +33,7 @@ llama-index-embeddings-ollama
 # Other dependencies
 google-generativeai>=0.5.2
 stripe==7.0.0
+svix>=1.0.0  # Required for Clerk webhook verification
 pillow>=10.2.0,<11.0.0  # Required by llama-index-llms-gemini
 openai>=1.0.0  # Required by llama-index-embeddings-openai
 

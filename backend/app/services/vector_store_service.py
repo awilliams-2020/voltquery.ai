@@ -126,6 +126,73 @@ class VectorStoreService:
             )
         return self._index
     
+    def ensure_index_exists(self):
+        """
+        Ensure the vecs collection has a cosine distance index.
+        This fixes the warning: "Query does not have a covering index for IndexMeasure.cosine_distance"
+        """
+        try:
+            # Access the underlying vecs collection from SupabaseVectorStore
+            vector_store = self.get_vector_store()
+            
+            # SupabaseVectorStore uses vecs internally, access the collection
+            # The collection is stored in the _collection attribute
+            if hasattr(vector_store, '_collection'):
+                collection = vector_store._collection
+                
+                # Try to import vecs IndexMeasure
+                try:
+                    from vecs import IndexMeasure
+                except ImportError:
+                    print("Warning: vecs library not directly importable. Index creation skipped.")
+                    print("This is not critical - queries will still work but may be slower.")
+                    return
+                
+                # Check if index already exists
+                try:
+                    # Check if list_indexes method exists (may not be available in all vecs versions)
+                    if hasattr(collection, 'list_indexes'):
+                        # Try to get existing indexes
+                        indexes = collection.list_indexes()
+                        
+                        # Check if cosine_distance index exists
+                        cosine_index_exists = any(
+                            idx.measure == IndexMeasure.cosine_distance 
+                            for idx in indexes
+                        )
+                        
+                        if not cosine_index_exists:
+                            print("Creating cosine distance index for vecs collection...")
+                            # Create the index
+                            collection.create_index(
+                                measure=IndexMeasure.cosine_distance
+                            )
+                            print("✅ Cosine distance index created successfully")
+                        else:
+                            print("✅ Cosine distance index already exists")
+                    else:
+                        # list_indexes not available, try creating index directly
+                        # (create_index will handle if index already exists)
+                        print("Creating cosine distance index for vecs collection...")
+                        collection.create_index(
+                            measure=IndexMeasure.cosine_distance
+                        )
+                        print("✅ Cosine distance index created successfully")
+                except Exception as e:
+                    # If index creation fails, it might already exist or there's another issue
+                    error_msg = str(e).lower()
+                    if "already exists" in error_msg or "duplicate" in error_msg:
+                        print("✅ Cosine distance index already exists")
+                    else:
+                        print(f"Warning: Could not create index: {str(e)}")
+                        print("This is not critical - queries will still work but may be slower")
+            else:
+                print("Warning: Could not access vecs collection to create index")
+                print("This is not critical - queries will still work but may be slower")
+        except Exception as e:
+            # Don't fail if index creation fails - it's just a performance optimization
+            print(f"Warning: Could not ensure index exists: {str(e)}")
+            print("This is not critical - queries will still work but may be slower")
     
     def reset(self):
         """Reset all cached instances."""

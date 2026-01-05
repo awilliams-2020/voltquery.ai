@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { useUser } from "@clerk/nextjs"
 import { SignIn, SignUp } from "@clerk/nextjs"
 import { QueryLimitBanner } from "@/components/query-limit-banner"
@@ -8,6 +8,8 @@ import { RAGQueryForm } from "@/components/rag-query-form"
 import { RAGResponseCard } from "@/components/rag-response-card"
 import { StructuredData } from "@/components/structured-data"
 import { Button } from "@/components/ui/button"
+import { Card, CardContent } from "@/components/ui/card"
+import { CheckCircle2, XCircle, X } from "lucide-react"
 
 interface QueryStats {
   queries_used: number
@@ -20,13 +22,54 @@ export default function Home() {
   const { isSignedIn, user } = useUser()
   const [stats, setStats] = useState<QueryStats | null>(null)
   const [loading, setLoading] = useState(false)
+  const [upgradeLoading, setUpgradeLoading] = useState(false)
   const [authMode, setAuthMode] = useState<"signin" | "signup">("signin")
+  const [showSuccessMessage, setShowSuccessMessage] = useState(false)
+  const [showCancelMessage, setShowCancelMessage] = useState(false)
+
+  const fetchStats = useCallback(async () => {
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+      const response = await fetch(`${apiUrl}/api/history/stats`, {
+        headers: {
+          "X-Clerk-User-Id": user?.id || "",
+          "X-Clerk-Email": user?.primaryEmailAddress?.emailAddress || "",
+        },
+      })
+      if (response.ok) {
+        const data = await response.json()
+        setStats(data)
+      }
+    } catch (error) {
+      console.error("Failed to fetch stats:", error)
+    }
+  }, [user?.id, user?.primaryEmailAddress?.emailAddress])
 
   useEffect(() => {
     if (isSignedIn) {
       fetchStats()
     }
-  }, [isSignedIn])
+    
+    // Check for success/cancel parameters in URL
+    const params = new URLSearchParams(window.location.search)
+    if (params.get("success") === "true") {
+      setShowSuccessMessage(true)
+      // Refresh stats to show updated subscription
+      if (isSignedIn) {
+        setTimeout(() => fetchStats(), 1000)
+      }
+      // Clean up URL
+      window.history.replaceState({}, "", window.location.pathname)
+      // Hide message after 5 seconds
+      setTimeout(() => setShowSuccessMessage(false), 5000)
+    } else if (params.get("canceled") === "true") {
+      setShowCancelMessage(true)
+      // Clean up URL
+      window.history.replaceState({}, "", window.location.pathname)
+      // Hide message after 5 seconds
+      setTimeout(() => setShowCancelMessage(false), 5000)
+    }
+  }, [isSignedIn, fetchStats])
 
   // Handle hash changes and link clicks for switching between sign-in/sign-up
   useEffect(() => {
@@ -66,25 +109,8 @@ export default function Home() {
     }
   }, [])
 
-  const fetchStats = async () => {
-    try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-      const response = await fetch(`${apiUrl}/api/history/stats`, {
-        headers: {
-          "X-Clerk-User-Id": user?.id || "",
-          "X-Clerk-Email": user?.primaryEmailAddress?.emailAddress || "",
-        },
-      })
-      if (response.ok) {
-        const data = await response.json()
-        setStats(data)
-      }
-    } catch (error) {
-      console.error("Failed to fetch stats:", error)
-    }
-  }
-
   const handleUpgrade = async () => {
+    setUpgradeLoading(true)
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
       const response = await fetch(`${apiUrl}/api/stripe/create-checkout`, {
@@ -105,6 +131,7 @@ export default function Home() {
       }
     } catch (error) {
       console.error("Failed to create checkout:", error)
+      setUpgradeLoading(false)
     }
   }
 
@@ -237,12 +264,63 @@ export default function Home() {
               </p>
             </div>
 
+            {showSuccessMessage && (
+              <Card className="mb-6 border-green-500 bg-green-500/10">
+                <CardContent className="pt-6">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <CheckCircle2 className="h-5 w-5 text-green-500" />
+                      <div>
+                        <p className="font-medium text-green-500">Upgrade Successful!</p>
+                        <p className="text-sm text-muted-foreground">
+                          Your Premium subscription is now active. Enjoy unlimited queries!
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setShowSuccessMessage(false)}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {showCancelMessage && (
+              <Card className="mb-6 border-yellow-500 bg-yellow-500/10">
+                <CardContent className="pt-6">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <XCircle className="h-5 w-5 text-yellow-500" />
+                      <div>
+                        <p className="font-medium text-yellow-500">Upgrade Canceled</p>
+                        <p className="text-sm text-muted-foreground">
+                          No charges were made. You can upgrade anytime from the banner above.
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setShowCancelMessage(false)}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             {stats && (
               <QueryLimitBanner
                 queriesUsed={stats.queries_used}
                 queryLimit={stats.query_limit}
                 plan={stats.plan}
                 onUpgrade={handleUpgrade}
+                upgradeLoading={upgradeLoading}
               />
             )}
 

@@ -325,6 +325,25 @@ A: {{"items": [
     {{"sub_question": "What is optimal solar/storage size and NPV for residential solar lease in 2026 (30% ITC)?", "tool_name": "optimization_tool"}}
 ]}}
 
+Q: "Where is the cheapest place in Florida to charge my EV?"
+A: {{"items": [
+    {{"sub_question": "Where are EV charging stations in Florida?", "tool_name": "transportation_tool"}},
+    {{"sub_question": "What are the electricity rates and costs for charging in Florida?", "tool_name": "utility_tool"}}
+]}}
+
+Q: "What's the most affordable place to charge near me?"
+A: {{"items": [
+    {{"sub_question": "Where are EV charging stations near me?", "tool_name": "transportation_tool"}},
+    {{"sub_question": "What are the electricity rates and costs for charging?", "tool_name": "utility_tool"}}
+]}}
+
+CRITICAL RULE FOR COST + LOCATION QUESTIONS:
+- If a question asks about "cheapest", "cheaper", "most affordable", "best price", "lowest cost", 
+  or compares costs across locations, you MUST generate TWO sub-questions:
+  1. One for finding locations/stations (transportation_tool)
+  2. One for getting cost/rate information (utility_tool)
+- This allows comparing costs across different locations to determine the cheapest option.
+
 CRITICAL RULE FOR 2026 SOLAR ROI QUESTIONS:
 - If the question mentions "ROI", "return on investment", "financial analysis", "NPV", "payback", or asks about buying/leasing solar in 2026, you MUST generate TWO separate sub-questions:
   1. One for purchase (0% ITC) - explicitly mention "purchase" and "0% ITC" in the sub-question

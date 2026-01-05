@@ -37,8 +37,6 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     query_limit INTEGER DEFAULT 3,
     queries_used INTEGER DEFAULT 0,
     status VARCHAR DEFAULT 'active',
-    current_period_start TIMESTAMP WITH TIME ZONE,
-    current_period_end TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );

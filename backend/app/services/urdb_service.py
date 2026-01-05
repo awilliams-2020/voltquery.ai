@@ -195,14 +195,22 @@ class URDBService:
             
             print(f"Indexing batch {batch_num}/{total_batches} ({len(batch)} documents)...")
             
-            for doc in batch:
-                try:
-                    index.insert(doc)
-                    indexed_count += 1
-                except Exception as e:
-                    skipped_count += 1
-                    if skipped_count <= 5:  # Only print first few errors
-                        print(f"  Skipped document: {str(e)[:100]}")
+            # Bulk insert documents for better performance
+            try:
+                # Bulk insert entire batch at once
+                index.insert(batch)
+                indexed_count += len(batch)
+            except Exception as e:
+                # If bulk insert fails, fall back to individual inserts for error handling
+                print(f"  Warning: Bulk insert failed, falling back to individual inserts: {str(e)[:100]}")
+                for doc in batch:
+                    try:
+                        index.insert(doc)
+                        indexed_count += 1
+                    except Exception as doc_error:
+                        skipped_count += 1
+                        if skipped_count <= 5:  # Only print first few errors
+                            print(f"  Skipped document: {str(doc_error)[:100]}")
         
         return {
             "total_zip_codes": len(urdb_data),
