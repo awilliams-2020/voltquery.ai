@@ -131,6 +131,12 @@ class DocumentService:
             "longitude": safe_float(station.get("longitude")),
         }
         
+        # Store queried_zip if provided (for stations fetched by zip code)
+        # This allows retrieval by the zip code that was queried, even if station has different zip
+        queried_zip = station.get("queried_zip")
+        if queried_zip:
+            metadata["queried_zip"] = queried_zip
+        
         # Remove None values
         return {k: v for k, v in metadata.items() if v is not None}
     

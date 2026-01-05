@@ -15,7 +15,7 @@ export function AppHeader() {
           <Link href="/" className="flex items-center gap-2">
             <Zap className="h-6 w-6 text-primary" />
             <span className="text-xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-              Energy Audit AI
+              Volt Query AI
             </span>
           </Link>
 

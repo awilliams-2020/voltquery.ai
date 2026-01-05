@@ -57,8 +57,18 @@ def get_tool(
     ]
     
     # Add location filters if provided
+    # Note: Utility rates use "zip" metadata, not "queried_zip"
+    # Convert any queried_zip filters to zip filters
     if location_filters:
-        utility_filter_filters.extend(location_filters)
+        for filter_obj in location_filters:
+            # If filter uses queried_zip, convert to zip (utility rates use zip)
+            if hasattr(filter_obj, 'key') and filter_obj.key == 'queried_zip':
+                utility_filter_filters.append(
+                    MetadataFilter(key="zip", value=filter_obj.value, operator=filter_obj.operator)
+                )
+            else:
+                # Keep other filters as-is (city, state, etc.)
+                utility_filter_filters.append(filter_obj)
     
     utility_filter = MetadataFilters(filters=utility_filter_filters)
     

@@ -4,6 +4,23 @@ import json
 import re
 import httpx
 
+# Mapping of full state names to 2-letter codes
+STATE_NAME_TO_CODE = {
+    "alabama": "AL", "alaska": "AK", "arizona": "AZ", "arkansas": "AR",
+    "california": "CA", "colorado": "CO", "connecticut": "CT", "delaware": "DE",
+    "florida": "FL", "georgia": "GA", "hawaii": "HI", "idaho": "ID",
+    "illinois": "IL", "indiana": "IN", "iowa": "IA", "kansas": "KS",
+    "kentucky": "KY", "louisiana": "LA", "maine": "ME", "maryland": "MD",
+    "massachusetts": "MA", "michigan": "MI", "minnesota": "MN", "mississippi": "MS",
+    "missouri": "MO", "montana": "MT", "nebraska": "NE", "nevada": "NV",
+    "new hampshire": "NH", "new jersey": "NJ", "new mexico": "NM", "new york": "NY",
+    "north carolina": "NC", "north dakota": "ND", "ohio": "OH", "oklahoma": "OK",
+    "oregon": "OR", "pennsylvania": "PA", "rhode island": "RI", "south carolina": "SC",
+    "south dakota": "SD", "tennessee": "TN", "texas": "TX", "utah": "UT",
+    "vermont": "VT", "virginia": "VA", "washington": "WA", "west virginia": "WV",
+    "wisconsin": "WI", "wyoming": "WY", "district of columbia": "DC"
+}
+
 
 class LocationService:
     """
@@ -13,6 +30,35 @@ class LocationService:
     
     def __init__(self):
         self.llm_service = LLMService()
+    
+    def _normalize_state(self, state: Optional[str]) -> Optional[str]:
+        """
+        Normalize state to 2-letter code.
+        
+        Args:
+            state: State name or code (e.g., "Colorado", "CO", "colorado")
+            
+        Returns:
+            2-letter state code or None if invalid
+        """
+        if not state:
+            return None
+        
+        state_upper = state.upper().strip()
+        
+        # If already 2 letters and valid, return as-is
+        if len(state_upper) == 2:
+            valid_codes = set(STATE_NAME_TO_CODE.values())
+            if state_upper in valid_codes:
+                return state_upper
+        
+        # Try to find in mapping (case-insensitive)
+        state_lower = state.lower().strip()
+        if state_lower in STATE_NAME_TO_CODE:
+            return STATE_NAME_TO_CODE[state_lower]
+        
+        # If not found, return None
+        return None
     
     async def extract_location_from_question(
         self, 
@@ -43,7 +89,9 @@ Extract any location information mentioned. Look for:
 - Zip codes (5 digits)
 - City names (e.g., "Denver", "Los Angeles", "New York")
 - State names or abbreviations (e.g., "Colorado", "CA", "Ohio", "OH")
-- Geographic references (e.g., "near me", "in my area")
+
+IMPORTANT: For states, ALWAYS return the 2-letter abbreviation (e.g., "CO" for Colorado, "CA" for California, "NY" for New York).
+Convert full state names to their 2-letter codes.
 
 Respond with ONLY a JSON object in this exact format:
 {{
@@ -78,6 +126,9 @@ Only return the JSON object, nothing else."""
                 state = location_data.get("state")
                 location_type = location_data.get("location_type")
                 
+                # Normalize state to 2-letter code
+                state = self._normalize_state(state)
+                
                 # If we have city/state but no zip code, try to geocode it
                 if not zip_code and city and state and location_type == "city_state":
                     zip_code = await self.geocode_city_state_to_zip(city, state)
@@ -88,7 +139,7 @@ Only return the JSON object, nothing else."""
                 return {
                     "zip_code": zip_code,
                     "city": city,
-                    "state": state,
+                    "state": state,  # Now normalized to 2-letter code
                     "location_type": location_type
                 }
             
@@ -191,7 +242,7 @@ Only return the JSON object, nothing else."""
         
         Args:
             city: City name
-            state: State code (2 letters)
+            state: State code (2 letters) or state name (will be normalized)
             
         Returns:
             Zip code string or None if geocoding fails
@@ -199,44 +250,57 @@ Only return the JSON object, nothing else."""
         if not city or not state:
             return None
         
+        # Normalize state to 2-letter code
+        state_code = self._normalize_state(state)
+        if not state_code:
+            return None
+        
         try:
             async with httpx.AsyncClient() as client:
-                # Use Nominatim to geocode city/state
-                query = f"{city}, {state}, USA"
-                params = {
-                    "q": query,
-                    "country": "US",
-                    "format": "json",
-                    "limit": 1,
-                    "addressdetails": 1  # Get detailed address including postal code
-                }
+                # Try multiple query formats for better geocoding success
+                query_formats = [
+                    f"{city}, {state_code}, USA",  # City, State Code, USA
+                    f"{city}, {state_code}",  # City, State Code
+                ]
                 
                 headers = {
                     "User-Agent": "NREL-RAG-SaaS/1.0"
                 }
                 
-                response = await client.get(
-                    "https://nominatim.openstreetmap.org/search",
-                    params=params,
-                    headers=headers,
-                    timeout=10.0
-                )
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    # Ensure data is a list and has at least one element
-                    if data and isinstance(data, list) and len(data) > 0:
-                        # Ensure first element is a dict
-                        first_result = data[0]
-                        if isinstance(first_result, dict):
-                            # Try to extract postal code from address details
-                            address = first_result.get("address", {})
-                            postal_code = address.get("postcode")
-                            if postal_code:
-                                # Extract first 5 digits if postal code is longer
-                                zip_match = re.search(r'\b(\d{5})\b', str(postal_code))
-                                if zip_match:
-                                    return zip_match.group(1)
+                for query in query_formats:
+                    try:
+                        params = {
+                            "q": query,
+                            "country": "US",
+                            "format": "json",
+                            "limit": 1,
+                            "addressdetails": 1  # Get detailed address including postal code
+                        }
+                        
+                        response = await client.get(
+                            "https://nominatim.openstreetmap.org/search",
+                            params=params,
+                            headers=headers,
+                            timeout=10.0
+                        )
+                        
+                        if response.status_code == 200:
+                            data = response.json()
+                            # Ensure data is a list and has at least one element
+                            if data and isinstance(data, list) and len(data) > 0:
+                                # Ensure first element is a dict
+                                first_result = data[0]
+                                if isinstance(first_result, dict):
+                                    # Try to extract postal code from address details
+                                    address = first_result.get("address", {})
+                                    postal_code = address.get("postcode")
+                                    if postal_code:
+                                        # Extract first 5 digits if postal code is longer
+                                        zip_match = re.search(r'\b(\d{5})\b', str(postal_code))
+                                        if zip_match:
+                                            return zip_match.group(1)
+                    except Exception:
+                        continue  # Try next format
                 
                 return None
         except Exception as e:

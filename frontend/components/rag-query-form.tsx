@@ -1,12 +1,14 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useUser } from "@clerk/nextjs"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Search, Zap } from "lucide-react"
 import { RAGResponseCard } from "./rag-response-card"
+import { RAGResponseSkeleton } from "./rag-response-skeleton"
+import { Spinner } from "@/components/ui/spinner"
 
 interface RAGResponse {
   question: string
@@ -19,13 +21,61 @@ interface RAGQueryFormProps {
   onQueryComplete?: () => void
 }
 
+type LoadingStage = 
+  | "analyzing" 
+  | "searching" 
+  | "retrieving" 
+  | "generating" 
+  | null
+
+const LOADING_STAGES: Array<{ stage: LoadingStage; message: string; delay: number }> = [
+  { stage: "analyzing", message: "Analyzing your question...", delay: 500 },
+  { stage: "searching", message: "Searching for relevant information...", delay: 1500 },
+  { stage: "retrieving", message: "Retrieving data from knowledge base...", delay: 2500 },
+  { stage: "generating", message: "Generating response...", delay: 3500 },
+]
+
 export function RAGQueryForm({ onQueryComplete }: RAGQueryFormProps) {
   const { user } = useUser()
   const [question, setQuestion] = useState("")
   const [zipCode, setZipCode] = useState("")
   const [loading, setLoading] = useState(false)
+  const [loadingStage, setLoadingStage] = useState<LoadingStage>(null)
   const [response, setResponse] = useState<RAGResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const stageTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (stageTimeoutRef.current) {
+        clearTimeout(stageTimeoutRef.current)
+      }
+    }
+  }, [])
+
+  const startProgressiveLoading = () => {
+    let currentIndex = 0
+    
+    const advanceStage = () => {
+      if (currentIndex < LOADING_STAGES.length) {
+        const currentStage = LOADING_STAGES[currentIndex]
+        setLoadingStage(currentStage.stage)
+        
+        if (currentIndex < LOADING_STAGES.length - 1) {
+          const nextStage = LOADING_STAGES[currentIndex + 1]
+          const delay = nextStage.delay - currentStage.delay
+          stageTimeoutRef.current = setTimeout(() => {
+            currentIndex++
+            advanceStage()
+          }, delay)
+        }
+        // If we're at the last stage, stay there until response arrives
+      }
+    }
+    
+    advanceStage()
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -34,6 +84,15 @@ export function RAGQueryForm({ onQueryComplete }: RAGQueryFormProps) {
     setLoading(true)
     setError(null)
     setResponse(null)
+    setLoadingStage("analyzing")
+    
+    // Clear any existing timeout
+    if (stageTimeoutRef.current) {
+      clearTimeout(stageTimeoutRef.current)
+    }
+    
+    // Start progressive loading stages
+    startProgressiveLoading()
 
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
@@ -65,7 +124,17 @@ export function RAGQueryForm({ onQueryComplete }: RAGQueryFormProps) {
       setError(err instanceof Error ? err.message : "An error occurred")
     } finally {
       setLoading(false)
+      setLoadingStage(null)
+      if (stageTimeoutRef.current) {
+        clearTimeout(stageTimeoutRef.current)
+        stageTimeoutRef.current = null
+      }
     }
+  }
+  
+  const getLoadingMessage = () => {
+    const stage = LOADING_STAGES.find(s => s.stage === loadingStage)
+    return stage?.message || "Processing your question..."
   }
 
   return (
@@ -102,7 +171,10 @@ export function RAGQueryForm({ onQueryComplete }: RAGQueryFormProps) {
               />
               <Button type="submit" disabled={loading || !question.trim()}>
                 {loading ? (
-                  "Processing..."
+                  <span className="flex items-center gap-2">
+                    <Spinner size="sm" />
+                    Processing...
+                  </span>
                 ) : (
                   <>
                     <Search className="h-4 w-4 mr-2" />
@@ -118,9 +190,21 @@ export function RAGQueryForm({ onQueryComplete }: RAGQueryFormProps) {
               <p className="text-destructive text-sm">{error}</p>
             </div>
           )}
+
+          {loading && (
+            <div className="mt-4 p-4 bg-primary/5 border border-primary/20 rounded-lg">
+              <div className="flex items-center gap-3">
+                <Spinner size="sm" />
+                <p className="text-sm text-muted-foreground animate-pulse">
+                  {getLoadingMessage()}
+                </p>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
+      {loading && <RAGResponseSkeleton />}
       {response && <RAGResponseCard response={response} />}
     </div>
   )

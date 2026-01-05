@@ -1,7 +1,9 @@
 "use client"
 
+import React from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { MessageSquare, MapPin } from "lucide-react"
+import { parseMarkdown } from "@/lib/utils"
 
 interface RAGResponse {
   question: string
@@ -31,7 +33,11 @@ export function RAGResponseCard({ response }: RAGResponseCardProps) {
         <div>
           <p className="text-sm text-muted-foreground mb-2">Answer:</p>
           <div className="prose prose-invert max-w-none">
-            <p className="whitespace-pre-wrap">{response.answer}</p>
+            <div className="space-y-2">
+              {parseMarkdown(response.answer).map((element, index) => (
+                <React.Fragment key={index}>{element}</React.Fragment>
+              ))}
+            </div>
           </div>
         </div>
         {response.sources && response.sources.length > 0 && (

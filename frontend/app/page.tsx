@@ -127,7 +127,7 @@ export default function Home() {
           <div className="max-w-md mx-auto">
             <div className="text-center mb-8">
               <h1 className="text-5xl font-bold mb-4 leading-normal pb-1 bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-                Energy Audit AI
+                Volt Query AI
               </h1>
               <p className="text-xl text-muted-foreground mb-6">
                 AI-powered EV charging station finder with intelligent energy audits
@@ -227,7 +227,7 @@ export default function Home() {
           <div className="max-w-4xl mx-auto">
             <div className="text-center mb-8">
               <h1 className="text-4xl font-bold mb-2 leading-normal pb-1 bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-                Energy Audit AI
+                Volt Query AI
               </h1>
               <p className="text-muted-foreground">
                 Ask questions about EV charging stations and get AI-powered insights

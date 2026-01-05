@@ -7,7 +7,7 @@ import "./globals.css"
 const inter = Inter({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
-  title: "Energy Audit AI - EV Infrastructure RAG SaaS",
+  title: "Volt Query AI - EV Infrastructure RAG SaaS",
   description: "AI-powered EV charging station finder with energy audits",
 }
 

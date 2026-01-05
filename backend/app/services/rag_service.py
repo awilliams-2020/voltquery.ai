@@ -80,6 +80,11 @@ class RAGService:
                 "message": "No stations found for this zip code"
             }
         
+        # Add queried_zip to each station so we can filter by it later
+        # (stations returned may have different zip codes than the one queried)
+        for station in stations:
+            station["queried_zip"] = zip_code
+        
         # Convert to Documents
         documents = self.document_service.stations_to_documents(stations)
         
@@ -233,6 +238,13 @@ class RAGService:
             if location_info:
                 location_type = location_info.get("location_type")
                 
+                # Normalize state to 2-letter code if present
+                if location_info.get("state"):
+                    normalized_state = self.location_service._normalize_state(location_info.get("state"))
+                    if normalized_state:
+                        location_info["state"] = normalized_state
+                        detected_location_info["state"] = normalized_state
+                
                 # Always try to extract zip_code first if available, regardless of location_type
                 extracted_zip = location_info.get("zip_code")
                 if extracted_zip:
@@ -334,7 +346,7 @@ class RAGService:
                     similarity_top_k=1,
                     filters=MetadataFilters(filters=[
                         MetadataFilter(key="domain", value="transportation", operator=FilterOperator.EQ),
-                        MetadataFilter(key="zip", value=location_to_use, operator=FilterOperator.EQ)
+                        MetadataFilter(key="queried_zip", value=location_to_use, operator=FilterOperator.EQ)
                     ])
                 )
                 # Try a quick retrieval to see if we have data
@@ -415,6 +427,7 @@ class RAGService:
         initial_top_k = top_k * 2 if use_reranking else top_k
         
         # Build location filters if we have location information
+        # Note: Transportation uses queried_zip, utility tool will convert to zip automatically
         location_filters = []
         if detected_location_info:
             city = detected_location_info.get("city")
@@ -423,9 +436,10 @@ class RAGService:
             
             # Add location-based filters
             if zip_code:
-                # Filter by zip code if available
+                # Transportation filter: use queried_zip (for stations fetched by zip)
+                # Utility tool will automatically convert queried_zip to zip
                 location_filters.append(
-                    MetadataFilter(key="zip", value=zip_code, operator=FilterOperator.EQ)
+                    MetadataFilter(key="queried_zip", value=zip_code, operator=FilterOperator.EQ)
                 )
             elif city and state:
                 # Filter by city and state

@@ -1,10 +1,12 @@
 "use client"
 
+import React from "react"
 import { useState, useEffect } from "react"
 import { useUser } from "@clerk/nextjs"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { History, Calendar, MapPin } from "lucide-react"
 import { format } from "date-fns"
+import { parseMarkdown } from "@/lib/utils"
 
 interface QueryHistoryItem {
   id: string
@@ -92,9 +94,11 @@ export default function HistoryPage() {
                       <p className="text-sm text-muted-foreground mb-2">
                         Answer ({query.sources_count} sources):
                       </p>
-                      <p className="whitespace-pre-wrap line-clamp-4">
-                        {query.answer}
-                      </p>
+                      <div className="space-y-2">
+                        {parseMarkdown(query.answer).map((element, index) => (
+                          <React.Fragment key={index}>{element}</React.Fragment>
+                        ))}
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
