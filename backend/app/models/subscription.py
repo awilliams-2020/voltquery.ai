@@ -14,7 +14,7 @@ class Subscription(Base):
     stripe_customer_id = Column(String, unique=True, index=True)
     stripe_subscription_id = Column(String, unique=True, index=True)
     plan = Column(String, default="free")  # "free", "pro", "enterprise"
-    query_limit = Column(Integer, default=5)  # Free tier: 5 queries
+    query_limit = Column(Integer, default=3)  # Free tier: 3 queries
     queries_used = Column(Integer, default=0)
     status = Column(String, default="active")  # "active", "canceled", "past_due"
     current_period_start = Column(DateTime(timezone=True))

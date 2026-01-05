@@ -1,0 +1,58 @@
+# AI Agent Discovery Metadata for Volt Query AI
+
+## About
+Volt Query AI is an AI-powered RAG (Retrieval-Augmented Generation) SaaS application that provides intelligent insights about EV charging stations, electricity rates, solar energy production, and energy system optimization.
+
+## Agent Information
+- Name: Volt Query AI
+- Version: 1.0.0
+- Type: Web Application / RAG System
+- Domain: EV Infrastructure, Energy Analytics, Renewable Energy
+- Language: English (en-US)
+
+## Capabilities
+- EV charging station location queries
+- Electricity rate and utility cost queries
+- Solar energy production estimates
+- Energy system optimization analysis
+- Natural language question answering
+- Location-based data retrieval
+
+## Data Sources
+- NREL Alternative Fuels Data Center API (EV charging stations)
+- NREL PVWatts API (solar production estimates)
+- OpenEI URDB API (utility rates)
+- NREL REopt API (energy optimization)
+
+## API Endpoints
+- POST /api/rag/query - Natural language query endpoint
+- POST /api/fetch-stations - EV charging station data
+- GET /api/history/queries - Query history
+- GET /api/history/stats - Usage statistics
+
+## Authentication
+- Required: Yes (via Clerk authentication)
+- Method: Header-based (X-Clerk-User-Id, X-Clerk-Email)
+
+## Rate Limits
+- Free tier: 10 queries/month
+- Pro tier: Unlimited queries
+
+## Contact
+- Website: https://voltquery.ai
+- Support: Available through application interface
+
+## Usage Guidelines
+- This service is designed for legitimate queries about EV infrastructure and energy data
+- Automated scraping or abuse is prohibited
+- Respect rate limits and terms of service
+- Data is provided for informational purposes only
+
+## Structured Data
+- Schema.org WebApplication markup available
+- JSON-LD structured data in page source
+- Open Graph metadata for social sharing
+
+## Last Updated
+2024-01-04
+

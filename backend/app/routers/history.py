@@ -65,7 +65,7 @@ async def get_query_stats(
         "total_queries": total_queries,
         "queries_used": subscription.queries_used if subscription else 0,
         "queries_remaining": subscription.get_remaining_queries() if subscription else 0,
-        "query_limit": subscription.query_limit if subscription else 5,
+        "query_limit": subscription.query_limit if subscription else 3,
         "plan": subscription.plan if subscription else "free"
     }
 

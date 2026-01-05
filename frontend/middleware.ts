@@ -6,6 +6,17 @@ const isPublicRoute = createRouteMatcher([
   "/api/webhooks(.*)",
   "/sign-in(.*)",
   "/sign-up(.*)",
+  "/sitemap.xml",
+  "/sitemap(.*)",
+  "/robots.txt",
+  "/robots(.*)",
+  "/ai.txt",
+  "/api/ai-metadata",
+  "/opengraph-image(.*)",
+  "/icon(.*)",
+  "/favicon(.*)",
+  "/apple-touch-icon(.*)",
+  "/site.webmanifest",
 ]);
 
 export default clerkMiddleware(async (auth, request) => {
@@ -22,10 +33,11 @@ export default clerkMiddleware(async (auth, request) => {
 
 export const config = {
   matcher: [
-    // Skip Next.js internals and all static files, unless found in search params
-    "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
-    // Always run for API routes
-    "/(api|trpc)(.*)",
+    // Skip Next.js internals, static files, and public metadata files
+    "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)|sitemap|robots|ai\\.txt|opengraph-image|icon|favicon|apple-touch-icon|site\\.webmanifest).*)",
+    // Always run for API routes (except public metadata endpoints)
+    "/api/:path*",
+    "/trpc/:path*",
   ],
 };
 

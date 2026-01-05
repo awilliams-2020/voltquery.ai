@@ -35,6 +35,10 @@ const LOADING_STAGES: Array<{ stage: LoadingStage; message: string; delay: numbe
   { stage: "generating", message: "Generating response...", delay: 3500 },
 ]
 
+const STORAGE_KEY_RESPONSE = "rag-last-response"
+const STORAGE_KEY_QUESTION = "rag-last-question"
+const STORAGE_KEY_ZIPCODE = "rag-last-zipcode"
+
 export function RAGQueryForm({ onQueryComplete }: RAGQueryFormProps) {
   const { user } = useUser()
   const [question, setQuestion] = useState("")
@@ -44,6 +48,30 @@ export function RAGQueryForm({ onQueryComplete }: RAGQueryFormProps) {
   const [response, setResponse] = useState<RAGResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const stageTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Restore response from sessionStorage on mount
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const savedResponse = sessionStorage.getItem(STORAGE_KEY_RESPONSE)
+        const savedQuestion = sessionStorage.getItem(STORAGE_KEY_QUESTION)
+        const savedZipCode = sessionStorage.getItem(STORAGE_KEY_ZIPCODE)
+        
+        if (savedResponse) {
+          const parsedResponse = JSON.parse(savedResponse)
+          setResponse(parsedResponse)
+        }
+        if (savedQuestion) {
+          setQuestion(savedQuestion)
+        }
+        if (savedZipCode) {
+          setZipCode(savedZipCode)
+        }
+      } catch (err) {
+        console.error("Failed to restore response from sessionStorage:", err)
+      }
+    }
+  }, [])
 
   // Cleanup timeout on unmount
   useEffect(() => {
@@ -86,6 +114,13 @@ export function RAGQueryForm({ onQueryComplete }: RAGQueryFormProps) {
     setResponse(null)
     setLoadingStage("analyzing")
     
+    // Clear sessionStorage for new query
+    if (typeof window !== "undefined") {
+      sessionStorage.removeItem(STORAGE_KEY_RESPONSE)
+      sessionStorage.setItem(STORAGE_KEY_QUESTION, question)
+      sessionStorage.setItem(STORAGE_KEY_ZIPCODE, zipCode)
+    }
+    
     // Clear any existing timeout
     if (stageTimeoutRef.current) {
       clearTimeout(stageTimeoutRef.current)
@@ -117,6 +152,16 @@ export function RAGQueryForm({ onQueryComplete }: RAGQueryFormProps) {
 
       const data = await response.json()
       setResponse(data)
+      
+      // Save response to sessionStorage
+      if (typeof window !== "undefined") {
+        try {
+          sessionStorage.setItem(STORAGE_KEY_RESPONSE, JSON.stringify(data))
+        } catch (err) {
+          console.error("Failed to save response to sessionStorage:", err)
+        }
+      }
+      
       if (onQueryComplete) {
         onQueryComplete()
       }
@@ -151,7 +196,7 @@ export function RAGQueryForm({ onQueryComplete }: RAGQueryFormProps) {
             <div>
               <Input
                 type="text"
-                placeholder="e.g., Where can I charge my Tesla?"
+                placeholder="e.g., Where can I charge my Tesla? What's the electricity rate in Denver? How much solar can I generate?"
                 value={question}
                 onChange={(e) => setQuestion(e.target.value)}
                 disabled={loading}

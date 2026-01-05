@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     stripe_customer_id VARCHAR UNIQUE,
     stripe_subscription_id VARCHAR UNIQUE,
     plan VARCHAR DEFAULT 'free',
-    query_limit INTEGER DEFAULT 5,
+    query_limit INTEGER DEFAULT 3,
     queries_used INTEGER DEFAULT 0,
     status VARCHAR DEFAULT 'active',
     current_period_start TIMESTAMP WITH TIME ZONE,

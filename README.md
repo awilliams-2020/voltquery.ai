@@ -1,6 +1,6 @@
 # NREL RAG SaaS - EV Infrastructure
 
-A monorepo RAG SaaS application for finding EV charging stations using the NREL API.
+A monorepo RAG SaaS application providing AI-powered insights for EV charging stations, electricity rates, solar energy production, and energy system optimization using the NREL API and related data sources.
 
 ## Project Structure
 
@@ -76,13 +76,19 @@ The frontend will be available at http://localhost:3000
 
 - **Backend**: FastAPI with NREL API integration
   - `/api/fetch-stations` endpoint that accepts zip codes
+  - `/api/rag/query` endpoint for natural language queries about:
+    - EV charging station locations and details
+    - Electricity rates and utility costs
+    - Solar energy production estimates
+    - Energy system optimization analysis
   - Modular service architecture for RAG logic
   - CORS configured for Next.js frontend
 
 - **Frontend**: Next.js 15 with Shadcn UI
-  - Modern dashboard with search functionality
+  - Modern dashboard with natural language query interface
   - Responsive design with Tailwind CSS
-  - Real-time station search by zip code
+  - Real-time AI-powered responses with source citations
+  - Query history tracking
 
 ## API Endpoints
 
@@ -121,8 +127,12 @@ Fetches EV charging stations for a given zip code.
 
 - **Frontend**: Next.js 15 (App Router), TypeScript, Tailwind CSS, Shadcn UI
 - **Backend**: Python 3.12, FastAPI, httpx
-- **API**: NREL Alternative Fuels Data Center API
-- **Future**: LlamaIndex RAG, Gemini 1.5 Pro, Supabase (pgvector)
+- **APIs**: 
+  - NREL Alternative Fuels Data Center API (EV charging stations)
+  - NREL PVWatts API (solar production estimates)
+  - OpenEI URDB API (utility rates)
+  - NREL REopt API (energy optimization)
+- **AI & RAG**: LlamaIndex RAG, Gemini 1.5 Pro, Supabase (pgvector)
 
 ## Development
 

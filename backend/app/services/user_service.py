@@ -29,7 +29,7 @@ class UserService:
                 id=uuid.uuid4(),
                 user_id=user.id,
                 plan="free",
-                query_limit=5,
+                query_limit=3,
                 queries_used=0,
                 status="active"
             )

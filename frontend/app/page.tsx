@@ -6,6 +6,7 @@ import { SignIn, SignUp } from "@clerk/nextjs"
 import { QueryLimitBanner } from "@/components/query-limit-banner"
 import { RAGQueryForm } from "@/components/rag-query-form"
 import { RAGResponseCard } from "@/components/rag-response-card"
+import { StructuredData } from "@/components/structured-data"
 import { Button } from "@/components/ui/button"
 
 interface QueryStats {
@@ -121,16 +122,18 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen">
-      {!isSignedIn ? (
-        <div className="container mx-auto px-4 py-8">
-          <div className="max-w-md mx-auto">
+    <>
+      <StructuredData />
+      <div className="min-h-screen">
+        {!isSignedIn ? (
+        <div className="container mx-auto px-2 sm:px-4 py-8">
+          <div className="max-w-md mx-auto w-full">
             <div className="text-center mb-8">
-              <h1 className="text-5xl font-bold mb-4 leading-normal pb-1 bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
+              <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold mb-4 leading-normal pb-1 bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
                 Volt Query AI
               </h1>
-              <p className="text-xl text-muted-foreground mb-6">
-                AI-powered EV charging station finder with intelligent energy audits
+              <p className="text-base sm:text-lg md:text-xl text-muted-foreground mb-6 px-2">
+                AI-powered insights for EV charging, electricity rates, solar energy, and energy optimization
               </p>
             </div>
 
@@ -138,14 +141,14 @@ export default function Home() {
             <div className="flex gap-2 mb-6 bg-card border border-border rounded-lg p-1">
               <Button
                 variant={authMode === "signin" ? "default" : "ghost"}
-                className="flex-1"
+                className="flex-1 min-w-0 text-sm sm:text-base"
                 onClick={() => setAuthMode("signin")}
               >
                 Sign In
               </Button>
               <Button
                 variant={authMode === "signup" ? "default" : "ghost"}
-                className="flex-1"
+                className="flex-1 min-w-0 text-sm sm:text-base"
                 onClick={() => setAuthMode("signup")}
               >
                 Sign Up
@@ -153,7 +156,7 @@ export default function Home() {
             </div>
 
             {/* Auth Forms */}
-            <div className="bg-card border border-border rounded-lg shadow-lg p-6">
+            <div className="bg-card border border-border rounded-lg shadow-lg p-3 sm:p-6 w-full">
               {authMode === "signin" ? (
                 <SignIn
                   appearance={{
@@ -230,7 +233,7 @@ export default function Home() {
                 Volt Query AI
               </h1>
               <p className="text-muted-foreground">
-                Ask questions about EV charging stations and get AI-powered insights
+                Ask questions about EV charging stations, electricity rates, solar energy, and energy optimization
               </p>
             </div>
 
@@ -247,6 +250,7 @@ export default function Home() {
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </>
   )
 }
