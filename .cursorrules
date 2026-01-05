@@ -1,0 +1,175 @@
+# Role
+You are an expert Senior Fullstack Engineer specializing in Next.js 15, FastAPI, and LlamaIndex RAG systems.
+
+# Tech Stack Rules
+
+## Frontend
+- **Framework**: Next.js 15 (App Router) with TypeScript
+- **Styling**: Tailwind CSS with Shadcn UI components
+- **Authentication**: Clerk (@clerk/nextjs v5.0.0)
+- **Payments**: Stripe (@stripe/stripe-js)
+- **State Management**: React hooks (useState, useEffect)
+- **API Communication**: Native fetch API
+- **Icons**: Lucide React
+
+## Backend
+- **Framework**: FastAPI (Python 3.12)
+- **Database**: Supabase PostgreSQL with pgvector extension
+- **ORM**: SQLAlchemy 2.0
+- **Authentication**: Clerk middleware (X-Clerk-User-Id, X-Clerk-Email headers)
+- **Payments**: Stripe integration
+- **API Client**: httpx (pinned to <0.25.0 for Supabase compatibility)
+- **Environment**: python-dotenv, pydantic-settings
+
+## AI & RAG
+- **RAG Framework**: LlamaIndex (core >=0.10.5,<0.11.0)
+- **LLM Options**: 
+  - Local: Ollama (llama-index-llms-ollama)
+  - Cloud: Gemini 1.5 Pro (llama-index-llms-gemini)
+- **Embeddings**:
+  - Local: Ollama nomic-embed-text (768 dimensions)
+  - Cloud: OpenAI text-embedding-3-small (1536 dimensions)
+- **Vector Store**: Supabase pgvector (llama-index-vector-stores-supabase)
+
+## External APIs
+- **NREL API**: Alternative Fuels Data Center (EV stations, utility rates, solar estimates)
+- **OpenEI API**: Utility Rate Database (URDB)
+- **Geocoding**: Via NREL API
+
+# Architecture Patterns
+
+## Backend Structure
+- **Routers** (`app/routers/`): API endpoints, thin controllers that delegate to services
+- **Services** (`app/services/`): Business logic, external API clients, RAG operations
+- **Models** (`app/models/`): SQLAlchemy ORM models (User, Query, Subscription)
+- **Middleware** (`app/middleware/`): Authentication, CORS, request processing
+- **Database** (`app/database.py`): SQLAlchemy session management
+
+## Service Layer Conventions
+- Services are classes with singleton patterns where appropriate
+- Use dependency injection for external dependencies
+- All external API calls go through service classes
+- RAG logic is modularized in `rag_service.py`
+- Circuit breakers wrap external API calls
+- Cache service handles TTL-based response caching
+
+## Frontend Structure
+- **App Router**: Next.js 15 App Router with route groups
+- **Components** (`components/`): Reusable UI components
+- **UI Components** (`components/ui/`): Shadcn UI primitives
+- **Client Components**: Use "use client" directive for interactivity
+- **Server Components**: Default for static/server-rendered content
+
+# Code Style
+
+## TypeScript/React
+- Use functional components exclusively
+- Prefer TypeScript interfaces for props and data structures
+- Use async/await for API calls
+- Handle loading and error states explicitly
+- Use Clerk hooks (`useUser`, `useAuth`) for authentication state
+
+## Python
+- Type hints required for function parameters and return types
+- Use Pydantic models for request/response validation
+- Async/await for all I/O operations
+- Use dependency injection via FastAPI's Depends()
+- Follow PEP 8 style guide
+
+## API Design
+- RESTful endpoints under `/api` prefix
+- JSON request/response bodies only
+- Consistent error response format: `{"error": "message"}`
+- Authentication via headers: `X-Clerk-User-Id`, `X-Clerk-Email`
+- Use HTTP status codes appropriately (200, 400, 401, 404, 500)
+
+# Key Patterns & Practices
+
+## Error Handling
+- Use try/except blocks for all external API calls
+- Return structured error responses
+- Log errors with context using logger_service
+- Circuit breakers prevent cascading failures
+
+## Caching Strategy
+- Utility rates: 24 hours TTL
+- Solar estimates: 1 hour TTL
+- Geocoding: 30 days TTL
+- Use CacheService.get_or_fetch() pattern
+
+## Input Validation
+- Validate all user inputs using validators.py
+- Zip codes: 5 digits
+- Questions: 3-2000 characters
+- Top K: 1-100
+- Return clear validation error messages
+
+## Logging
+- Use structured JSON logging via logger_service
+- Log query events, API calls, circuit breaker state changes
+- Include context: user_id, response_time, success/failure
+
+## Database
+- Use SQLAlchemy ORM models
+- Migrations in `migrations/` directory
+- Vector dimensions: 768 (Ollama) or 1536 (OpenAI)
+- Use connection pooling via Supabase
+
+## Authentication & Authorization
+- Clerk handles user authentication
+- Backend validates Clerk headers in middleware
+- User context passed via headers to all authenticated endpoints
+- Query limits enforced per subscription plan
+
+## Payments
+- Stripe integration for subscriptions
+- Webhook handling for subscription events
+- Free tier: 10 queries/month
+- Pro tier: Unlimited queries (configurable via Stripe price ID)
+
+# File Naming Conventions
+- Python: snake_case (e.g., `rag_service.py`, `nrel_client.py`)
+- TypeScript: kebab-case for files (e.g., `rag-query-form.tsx`)
+- Components: PascalCase (e.g., `RAGQueryForm`)
+- Routes: Next.js App Router conventions (folders, page.tsx)
+
+# Testing
+- Backend: pytest with conftest.py
+- Test files: `test_*.py` in `tests/` directory
+- Use fixtures for database sessions and test data
+
+# Environment Variables
+- Backend: `.env` in `backend/` directory
+- Frontend: `.env.local` or `.env` in `frontend/` directory
+- Use `NEXT_PUBLIC_` prefix for frontend-accessible env vars
+- Document all required env vars in README
+
+# Dependencies
+- Pin critical versions (httpx <0.25.0 for Supabase)
+- Use requirements.txt for Python dependencies
+- Use package.json for Node.js dependencies
+- Keep LlamaIndex versions compatible (core >=0.10.5,<0.11.0)
+
+# Performance
+- Use async/await for all I/O operations
+- Implement response caching for expensive API calls
+- Circuit breakers prevent repeated failures
+- Bulk indexing scripts for local development over-indexing
+
+# Security
+- Never expose API keys in client-side code
+- Validate all user inputs server-side
+- Use Clerk for authentication (never implement custom auth)
+- Sanitize user inputs before database queries
+- Use parameterized queries (SQLAlchemy handles this)
+
+# Documentation
+- Keep README files updated
+- Document API endpoints in backend README
+- Include code comments for complex logic
+- Document environment variables required
+
+# Git & Version Control
+- Commit messages should be descriptive
+- Keep migrations in `migrations/` directory
+- Don't commit `.env` files or `venv/` directories

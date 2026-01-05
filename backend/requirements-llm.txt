@@ -1,0 +1,8 @@
+# LlamaIndex dependencies (install after core)
+llama-index>=0.10.5,<0.11.0
+llama-index-llms-ollama
+llama-index-llms-gemini
+llama-index-vector-stores-supabase
+llama-index-embeddings-openai
+llama-index-embeddings-ollama
+

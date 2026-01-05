@@ -1,0 +1,36 @@
+# Core dependencies
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+python-dotenv==1.0.0
+httpx==0.24.1  # Pinned for Supabase compatibility (<0.25.0)
+pydantic>=2.11.5  # Required by llama-index packages
+pydantic-settings==2.1.0
+python-jose[cryptography]==3.3.0
+python-multipart==0.0.6
+starlette>=0.35.0,<0.36.0
+click>=7.0
+
+# Database dependencies
+sqlalchemy==2.0.25
+alembic==1.13.1
+psycopg2-binary==2.9.9
+supabase==2.3.0
+postgrest==0.13.0
+
+# LlamaIndex dependencies (Python 3.12 compatible)
+# Note: httpx conflict - Supabase needs <0.25.0, but Ollama needs >=0.27
+# Solution: llama-index-llms-ollama will use its own httpx internally
+llama-index-core>=0.10.5,<0.11.0  # Pin version to avoid conflicts
+llama-index-llms-ollama  # May have httpx conflict but should work
+llama-index-llms-gemini
+llama-index-vector-stores-supabase
+llama-index-embeddings-openai
+llama-index-embeddings-ollama
+# Note: RouterQueryEngine uses LLMSingleSelector (in core) instead of PydanticSingleSelector
+# to avoid requiring llama-index-program-openai (which has version conflicts)
+
+# Other dependencies
+google-generativeai>=0.5.2
+stripe==7.0.0
+pillow>=10.2.0,<11.0.0  # Required by llama-index-llms-gemini
+

@@ -1,0 +1,117 @@
+# Root-level .gitignore for NREL RAG SaaS Project
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+*.env
+
+# Python (backend)
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environments
+venv/
+env/
+ENV/
+.venv/
+
+# Node.js / Next.js (frontend)
+node_modules/
+.pnp
+.pnp.js
+.next/
+out/
+build/
+dist/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+coverage/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.sublime-project
+*.sublime-workspace
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# Logs
+*.log
+logs/
+*.log.*
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+tmp/
+temp/
+
+# Build artifacts
+*.pyc
+*.pyo
+*.pyd
+*.so
+*.dylib
+
+# Documentation builds
+docs/_build/
+site/
+
+# Package manager locks (optional - uncomment if you want to ignore)
+# package-lock.json
+# yarn.lock
+# poetry.lock
+
+# Stripe webhook testing
+stripe-webhook-test-*
+
+# Local development
+.local/
+local/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# TypeScript
+*.tsbuildinfo
+
+# Vercel
+.vercel
+
+# Misc
+*.bak
+*.backup
+*.old
+

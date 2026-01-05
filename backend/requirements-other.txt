@@ -1,0 +1,4 @@
+# Other dependencies
+google-generativeai>=0.3.0
+stripe==7.0.0
+

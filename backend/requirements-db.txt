@@ -1,0 +1,7 @@
+# Database dependencies
+sqlalchemy==2.0.25
+alembic==1.13.1
+psycopg2-binary==2.9.9
+supabase==2.3.0
+postgrest==0.13.0
+
