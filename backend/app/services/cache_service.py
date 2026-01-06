@@ -23,7 +23,8 @@ class CacheEntry:
     
     def is_expired(self, ttl: timedelta) -> bool:
         """Check if entry is expired."""
-        return datetime.now() - self.timestamp > ttl
+        age = datetime.now() - self.timestamp
+        return age > ttl
 
 
 class CacheService:
@@ -72,12 +73,24 @@ class CacheService:
                     return entry.data
                 else:
                     # Remove expired entry
+                    age_seconds = int((datetime.now() - entry.timestamp).total_seconds())
                     del self._cache[key]
+                    self.logger.log_cache(
+                        operation="get",
+                        key=key,
+                        cache_hit=False,
+                        ttl_seconds=int(ttl.total_seconds()),
+                        expired=True,
+                        age_seconds=age_seconds
+                    )
+                    return None
+            # Key not in cache
             self.logger.log_cache(
                 operation="get",
                 key=key,
                 cache_hit=False,
-                ttl_seconds=int(ttl.total_seconds())
+                ttl_seconds=int(ttl.total_seconds()),
+                expired=False
             )
             return None
     

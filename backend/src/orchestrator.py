@@ -5,23 +5,19 @@ The orchestrator pattern centralizes the initialization of the SubQuestionQueryE
 and dynamically registers tools from the bundles/ directory.
 """
 
-import importlib
-import os
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Any
 from llama_index.core.query_engine import SubQuestionQueryEngine
 from llama_index.core.tools import QueryEngineTool
 from llama_index.core.callbacks import CallbackManager
 from llama_index.core.question_gen.llm_generators import LLMQuestionGenerator
-from llama_index.core.question_gen.output_parser import SubQuestionOutputParser
 from llama_index.core.output_parsers.base import BaseOutputParser, StructuredOutput
 from llama_index.core.question_gen.types import SubQuestion
 import json
-from llama_index.core.prompts.base import PromptTemplate
-from llama_index.core.question_gen.prompts import build_tools_text
 from src.debug_utils import setup_global_observability
 from src.bundles.solar import get_tool as get_solar_tool
 from src.bundles.transportation import get_tool as get_transportation_tool
 from src.bundles.utility import get_tool as get_utility_tool
+from src.bundles.buildings import get_tool as get_buildings_tool
 
 
 class RobustSubQuestionOutputParser(BaseOutputParser):
@@ -125,7 +121,7 @@ class RobustSubQuestionOutputParser(BaseOutputParser):
                 raise ValueError(f"'items' key should contain a list, got: {type(items)}")
             
             sub_questions = []
-            for idx, item in enumerate(items):
+            for item in items:
                 if not isinstance(item, dict):
                     continue
                 if "sub_question" not in item or "tool_name" not in item:
@@ -222,6 +218,15 @@ class ToolNameMappingParser(BaseOutputParser):
                         "solar savings", "solar offset", "solar payback", "photovoltaic", "pv system"
                     ]):
                         sub_q.tool_name = "solar_production_tool"
+                    elif any(keyword in sub_q_text_lower for keyword in [
+                        "building code", "energy code", "iecc", "ashrae", "building standard",
+                        "efficiency requirement", "code compliance", "building performance",
+                        "energy efficiency standard", "building energy code", "building codes",
+                        "energy standards", "building efficiency", "lower bill", "reduce bill",
+                        "lower electricity", "reduce electricity", "energy efficiency measure",
+                        "energy retrofit", "improve efficiency", "reduce consumption"
+                    ]):
+                        sub_q.tool_name = "buildings_tool"
                     else:
                         # Default to transportation_tool
                         sub_q.tool_name = "transportation_tool"
@@ -255,13 +260,13 @@ class RAGOrchestrator:
             llm: LLM instance for query processing
             vector_store_service: Vector store service for retrievers
             callback_manager: Optional callback manager
-            enable_observability: Whether to enable global observability
-            observability_handler_type: Type of observability handler ("simple" or "verbose")
+            enable_observability: Whether to enable observability (creates callback manager)
+            observability_handler_type: Ignored (kept for backward compatibility)
         """
         self.llm = llm
         self.vector_store_service = vector_store_service
         
-        # Set up observability if enabled
+        # Set up callback manager if enabled
         if enable_observability:
             self.callback_manager = setup_global_observability(
                 handler_type=observability_handler_type,
@@ -295,6 +300,7 @@ TOOL USAGE:
 - transportation_tool: Finding EV charging stations, locations, charger types
 - utility_tool: Electricity rates, costs, time-of-use rates, utility info
 - solar_production_tool: Solar energy production estimates (kWh) for location/system size
+- buildings_tool: Building energy codes, efficiency standards, code compliance, building performance, energy efficiency measures to reduce bills
 - optimization_tool: Investment analysis, ROI, optimal sizing, NPV. MUST include location (zip/city/state/coordinates) in sub-question.
 
 TAX CREDIT CONTEXT (2026 OBBBA):
@@ -335,6 +341,13 @@ Q: "What's the most affordable place to charge near me?"
 A: {{"items": [
     {{"sub_question": "Where are EV charging stations near me?", "tool_name": "transportation_tool"}},
     {{"sub_question": "What are the electricity rates and costs for charging?", "tool_name": "utility_tool"}}
+]}}
+
+Q: "How do I lower my electricity bill?"
+A: {{"items": [
+    {{"sub_question": "What are current electricity rates?", "tool_name": "utility_tool"}},
+    {{"sub_question": "What are building energy efficiency standards and measures to reduce energy consumption?", "tool_name": "buildings_tool"}},
+    {{"sub_question": "What is solar production potential to offset electricity costs?", "tool_name": "solar_production_tool"}}
 ]}}
 
 CRITICAL RULE FOR COST + LOCATION QUESTIONS:
@@ -379,6 +392,7 @@ YOUR TASK:
         rerank_top_n: int = 3,
         location_filters: Optional[List] = None,
         nrel_client=None,
+        bcl_client=None,
         location_service=None,
         reopt_service=None
     ) -> List[QueryEngineTool]:
@@ -391,6 +405,7 @@ YOUR TASK:
             rerank_top_n: Number of results to rerank if reranking is enabled
             location_filters: Optional location-based metadata filters
             nrel_client: Optional NREL client (creates new if not provided)
+            bcl_client: Optional BCL client (creates new if not provided)
             location_service: Optional location service (creates new if not provided)
             reopt_service: Optional REopt service (creates new if not provided)
             
@@ -431,6 +446,18 @@ YOUR TASK:
             location_filters=location_filters
         )
         tools.append(utility_tool)
+        
+        # Create buildings tool
+        buildings_tool = get_buildings_tool(
+            llm=self.llm,
+            vector_store_service=self.vector_store_service,
+            callback_manager=self.callback_manager,
+            top_k=top_k,
+            use_reranking=use_reranking,
+            rerank_top_n=rerank_top_n,
+            location_filters=location_filters
+        )
+        tools.append(buildings_tool)
         
         # Create optimization tool if REopt service is provided
         if reopt_service:

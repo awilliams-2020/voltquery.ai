@@ -1,4 +1,5 @@
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
+from datetime import datetime
 from llama_index.core import Document
 from llama_index.core.schema import TextNode
 
@@ -136,6 +137,10 @@ class DocumentService:
         queried_zip = station.get("queried_zip")
         if queried_zip:
             metadata["queried_zip"] = queried_zip
+        
+        # Add timestamp for freshness tracking
+        metadata["indexed_at"] = datetime.utcnow().isoformat() + "Z"
+        metadata["source"] = "nrel_api"
         
         # Remove None values
         return {k: v for k, v in metadata.items() if v is not None}
@@ -290,6 +295,10 @@ class DocumentService:
             if location and location.isdigit() and len(location) == 5:
                 metadata["zip"] = location
             
+            # Add timestamp for freshness tracking
+            metadata["indexed_at"] = datetime.utcnow().isoformat() + "Z"
+            metadata["source"] = "nrel_api"
+            
             # Remove None values
             metadata = {k: v for k, v in metadata.items() if v is not None}
             
@@ -298,6 +307,91 @@ class DocumentService:
             
             # Create document with unique ID
             doc_id = f"utility_{location}_{eiaid or utility_name or 'unknown'}"
+            doc_id = doc_id.replace(" ", "_").replace(",", "_").lower()
+            
+            doc = Document(
+                text=doc_text,
+                metadata=metadata,
+                id_=doc_id
+            )
+            
+            documents.append(doc)
+        
+        return documents
+    
+    @staticmethod
+    def bcl_measures_to_documents(measures: List[Dict[str, Any]], state: Optional[str] = None) -> List[Document]:
+        """
+        Convert BCL (Building Component Library) measures into LlamaIndex Document objects.
+        
+        Args:
+            measures: List of BCL measure dictionaries from BCL API
+            state: Optional state code (e.g., "IL", "CA")
+            
+        Returns:
+            List of LlamaIndex Document objects
+        """
+        documents = []
+        
+        if not measures or not isinstance(measures, list):
+            return documents
+        
+        for measure in measures:
+            if not isinstance(measure, dict):
+                continue
+            
+            # Extract measure information
+            name = measure.get("display_name") or measure.get("name", "Unknown Measure")
+            description = measure.get("description", "")
+            modeler_description = measure.get("modeler_description", "")
+            uuid = measure.get("uuid") or measure.get("version_id", "")
+            
+            # Build document text
+            parts = [f"Measure: {name}"]
+            
+            if description:
+                parts.append(f"Description: {description}")
+            
+            if modeler_description:
+                parts.append(f"Details: {modeler_description}")
+            
+            # Extract tags if available
+            tags = measure.get("tags", [])
+            if tags:
+                parts.append(f"Tags: {', '.join(tags)}")
+            
+            # Extract attributes if available
+            attributes = measure.get("attributes", {})
+            if attributes:
+                attr_parts = []
+                for key, value in attributes.items():
+                    if value:
+                        attr_parts.append(f"{key}: {value}")
+                if attr_parts:
+                    parts.append(f"Attributes: {'; '.join(attr_parts)}")
+            
+            doc_text = "\n".join(parts)
+            
+            # Create metadata
+            metadata = {
+                "domain": "buildings",
+                "source": "bcl",
+                "name": name,
+                "uuid": uuid,
+            }
+            
+            if state:
+                metadata["state"] = state
+            
+            # Add timestamp for freshness tracking
+            metadata["indexed_at"] = datetime.utcnow().isoformat() + "Z"
+            metadata["source"] = "bcl_api"
+            
+            # Remove None values
+            metadata = {k: v for k, v in metadata.items() if v is not None}
+            
+            # Create document with unique ID
+            doc_id = f"bcl_measure_{uuid or name.replace(' ', '_').lower()}"
             doc_id = doc_id.replace(" ", "_").replace(",", "_").lower()
             
             doc = Document(

@@ -1,0 +1,139 @@
+{
+  "metadata": {
+    "description": "Test queries for manual regression testing",
+    "usage": "Use these queries to manually test the RAG service after changes",
+    "last_updated": "2026-01-05"
+  },
+  "categories": {
+    "simple": {
+      "name": "Simple Single-Tool Queries",
+      "queries": [
+        {
+          "query": "Where can I charge my EV?",
+          "expected_tool": "transportation_tool",
+          "location": null,
+          "notes": "Should detect location or use provided zip_code"
+        },
+        {
+          "query": "Find charging stations near 80202",
+          "expected_tool": "transportation_tool",
+          "location": "80202",
+          "notes": "Explicit zip code"
+        },
+        {
+          "query": "What is the electricity cost per kWh in 45424?",
+          "expected_tool": "utility_tool",
+          "location": "45424",
+          "notes": "Utility rate query"
+        },
+        {
+          "query": "What is solar production for a 5kW system in zip 80202?",
+          "expected_tool": "solar_production_tool",
+          "location": "80202",
+          "notes": "Solar production query"
+        },
+        {
+          "query": "What is the optimal solar and storage size for zip 80202?",
+          "expected_tool": "optimization_tool",
+          "location": "80202",
+          "notes": "Optimization query - should return optimal sizing"
+        },
+        {
+          "query": "What's the ROI for solar in Denver, CO?",
+          "expected_tool": "optimization_tool",
+          "location": "Denver, CO",
+          "notes": "ROI analysis query"
+        },
+        {
+          "query": "Optimal solar system size and NPV for 45424?",
+          "expected_tool": "optimization_tool",
+          "location": "45424",
+          "notes": "NPV and optimal sizing query"
+        }
+      ]
+    },
+    "medium": {
+      "name": "Medium Complexity Queries",
+      "queries": [
+        {
+          "query": "Where can I charge my EV and what does it cost?",
+          "expected_tools": ["transportation_tool", "utility_tool"],
+          "location": null,
+          "notes": "Two-tool combination"
+        },
+        {
+          "query": "Compare charging at 11 PM vs 4kW solar in zip 45424",
+          "expected_tools": ["utility_tool", "solar_production_tool"],
+          "location": "45424",
+          "notes": "Cost comparison query"
+        },
+        {
+          "query": "What's the payback period for solar in zip 80202?",
+          "expected_tool": "optimization_tool",
+          "location": "80202",
+          "notes": "Payback period analysis"
+        },
+        {
+          "query": "Financial analysis for solar in Denver: NPV and payback period",
+          "expected_tool": "optimization_tool",
+          "location": "Denver, CO",
+          "notes": "Comprehensive financial analysis"
+        }
+      ]
+    },
+    "complex": {
+      "name": "Complex Multi-Tool Queries",
+      "queries": [
+        {
+          "query": "Where can I charge, what does it cost, and can solar offset it in zip 80202?",
+          "expected_tools": ["transportation_tool", "utility_tool", "solar_production_tool"],
+          "location": "80202",
+          "notes": "Three-tool combination"
+        },
+        {
+          "query": "What's the ROI for solar in zip 80202 in 2026?",
+          "expected_tool": "optimization_tool",
+          "location": "80202",
+          "notes": "Should generate 2 sub-questions: purchase vs lease"
+        },
+        {
+          "query": "Should I buy or lease solar panels for my home in 2026?",
+          "expected_tool": "optimization_tool",
+          "location": null,
+          "notes": "Should compare purchase (0% ITC) vs lease (30% ITC) scenarios"
+        },
+        {
+          "query": "Compare savings: charging at 11 PM vs 4kW solar vs optimal system in zip 45424",
+          "expected_tools": ["utility_tool", "solar_production_tool", "optimization_tool"],
+          "location": "45424",
+          "notes": "Complex multi-scenario comparison with optimization"
+        },
+        {
+          "query": "What's the most cost-effective: charging at night, solar, or both in 80202?",
+          "expected_tools": ["utility_tool", "solar_production_tool", "optimization_tool"],
+          "location": "80202",
+          "notes": "Multi-scenario cost optimization"
+        },
+        {
+          "query": "Find charging stations, electricity rates, and optimal solar size in Denver, CO",
+          "expected_tools": ["transportation_tool", "utility_tool", "optimization_tool"],
+          "location": "Denver, CO",
+          "notes": "Three-tool combination including optimization"
+        },
+        {
+          "query": "What's the optimal solar sizing and investment analysis?",
+          "expected_tool": "optimization_tool",
+          "location": null,
+          "notes": "Investment analysis query"
+        },
+        {
+          "query": "Compare purchase vs lease solar in 2026 for zip 80202",
+          "expected_tool": "optimization_tool",
+          "location": "80202",
+          "notes": "Should generate 2 sub-questions comparing financing options"
+        }
+      ]
+    }
+  }
+}
+

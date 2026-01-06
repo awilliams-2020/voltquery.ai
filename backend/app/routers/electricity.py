@@ -7,6 +7,9 @@ from app.models.user import User
 
 router = APIRouter()
 
+# Constants
+VALID_SECTORS = ["residential", "commercial", "industrial"]
+
 
 class UtilityRatesRequest(BaseModel):
     location: str  # Can be zip code, address, or lat/long
@@ -48,11 +51,10 @@ async def get_utility_rates(
     """
     try:
         # Validate sector
-        valid_sectors = ["residential", "commercial", "industrial"]
-        if request.sector and request.sector.lower() not in valid_sectors:
+        if request.sector and request.sector.lower() not in VALID_SECTORS:
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid sector. Must be one of: {', '.join(valid_sectors)}"
+                detail=f"Invalid sector. Must be one of: {', '.join(VALID_SECTORS)}"
             )
         
         nrel_client = NRELClient()
@@ -92,11 +94,10 @@ async def get_utility_rates_by_zip(
     """
     try:
         # Validate sector
-        valid_sectors = ["residential", "commercial", "industrial"]
-        if request.sector and request.sector.lower() not in valid_sectors:
+        if request.sector and request.sector.lower() not in VALID_SECTORS:
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid sector. Must be one of: {', '.join(valid_sectors)}"
+                detail=f"Invalid sector. Must be one of: {', '.join(VALID_SECTORS)}"
             )
         
         # Validate zip code format

@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routers import stations, llm, rag, stripe, history, electricity, urdb, clerk
 from app.services.vector_store_service import VectorStoreService
@@ -8,7 +8,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="NREL RAG SaaS API", version="1.0.0")
+app = FastAPI(title="VoltQuery.ai API", version="1.0.0")
 
 # Configure CORS - allow frontend URL from environment variable
 frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
@@ -40,7 +40,7 @@ app.include_router(urdb.router, prefix="/api", tags=["urdb"])
 
 @app.get("/")
 async def root():
-    return {"message": "NREL RAG SaaS API"}
+    return {"message": "VoltQuery.ai API"}
 
 
 @app.get("/health")

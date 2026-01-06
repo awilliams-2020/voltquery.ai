@@ -164,10 +164,14 @@ You are an expert Senior Fullstack Engineer specializing in Next.js 15, FastAPI,
 - Use parameterized queries (SQLAlchemy handles this)
 
 # Documentation
-- Keep README files updated
+- **Single Source of Truth**: All project documentation must be maintained in `docs/PROJECT_DOCUMENTATION.md` only
+- **DO NOT** create new documentation files in `docs/` - update `PROJECT_DOCUMENTATION.md` instead
+- When making architectural changes, significant feature additions, or implementation improvements, update the relevant section in `PROJECT_DOCUMENTATION.md`
+- Keep README files updated for quick reference
 - Document API endpoints in backend README
 - Include code comments for complex logic
 - Document environment variables required
+- Historical/one-time implementation notes should NOT be kept as separate files - key learnings should be incorporated into `PROJECT_DOCUMENTATION.md` if still relevant
 
 # Git & Version Control
 - Commit messages should be descriptive

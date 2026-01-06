@@ -1,11 +1,11 @@
-# NREL RAG SaaS - EV Infrastructure
+# VoltQuery.ai - EV Infrastructure
 
 A monorepo RAG SaaS application providing AI-powered insights for EV charging stations, electricity rates, solar energy production, and energy system optimization using the NREL API and related data sources.
 
 ## Project Structure
 
 ```
-nrel-rag-saas/
+voltquery.ai/
 ├── frontend/          # Next.js 15 application
 ├── backend/           # FastAPI application
 └── README.md

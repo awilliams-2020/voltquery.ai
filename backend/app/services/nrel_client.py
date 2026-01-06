@@ -83,7 +83,7 @@ class NRELClient:
             }
             
             headers = {
-                "User-Agent": "NREL-RAG-SaaS/1.0"  # Required by Nominatim
+                "User-Agent": "VoltQuery.ai/1.0"  # Required by Nominatim
             }
             
             try:
@@ -209,16 +209,71 @@ class NRELClient:
             # Remove extra spaces and normalize
             location_clean = " ".join(location.split())
             
-            # Try different query formats if the first one fails
+            headers = {
+                "User-Agent": "VoltQuery.ai/1.0"
+            }
+            
+            # Try structured parameters first (city, state) - more reliable
+            # Parse "City, State" format
+            if "," in location_clean:
+                parts = [p.strip() for p in location_clean.split(",")]
+                if len(parts) == 2:
+                    city = parts[0]
+                    state = parts[1]
+                    
+                    # Map state abbreviations to full names if needed
+                    state_abbrev_map = {
+                        "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas",
+                        "CA": "California", "CO": "Colorado", "CT": "Connecticut", "DE": "Delaware",
+                        "FL": "Florida", "GA": "Georgia", "HI": "Hawaii", "ID": "Idaho",
+                        "IL": "Illinois", "IN": "Indiana", "IA": "Iowa", "KS": "Kansas",
+                        "KY": "Kentucky", "LA": "Louisiana", "ME": "Maine", "MD": "Maryland",
+                        "MA": "Massachusetts", "MI": "Michigan", "MN": "Minnesota", "MS": "Mississippi",
+                        "MO": "Missouri", "MT": "Montana", "NE": "Nebraska", "NV": "Nevada",
+                        "NH": "New Hampshire", "NJ": "New Jersey", "NM": "New Mexico", "NY": "New York",
+                        "NC": "North Carolina", "ND": "North Dakota", "OH": "Ohio", "OK": "Oklahoma",
+                        "OR": "Oregon", "PA": "Pennsylvania", "RI": "Rhode Island", "SC": "South Carolina",
+                        "SD": "South Dakota", "TN": "Tennessee", "TX": "Texas", "UT": "Utah",
+                        "VT": "Vermont", "VA": "Virginia", "WA": "Washington", "WV": "West Virginia",
+                        "WI": "Wisconsin", "WY": "Wyoming", "DC": "District of Columbia"
+                    }
+                    
+                    # Use full state name if it's an abbreviation
+                    if len(state) == 2 and state.upper() in state_abbrev_map:
+                        state = state_abbrev_map[state.upper()]
+                    
+                    try:
+                        params = {
+                            "city": city,
+                            "state": state,
+                            "country": "US",
+                            "format": "json",
+                            "limit": 1
+                        }
+                        
+                        response = await client.get(
+                            self.GEOCODING_URL,
+                            params=params,
+                            headers=headers,
+                            timeout=10.0
+                        )
+                        
+                        if response.status_code == 200:
+                            data = response.json()
+                            if data and isinstance(data, list) and len(data) > 0:
+                                first_result = data[0]
+                                if isinstance(first_result, dict) and "lat" in first_result and "lon" in first_result:
+                                    lat = float(first_result["lat"])
+                                    lon = float(first_result["lon"])
+                                    return (lat, lon)
+                    except Exception:
+                        pass  # Fall through to q parameter method
+            
+            # Fallback: Try different query formats with 'q' parameter
             query_formats = [
                 location_clean,  # Original format
                 f"{location_clean}, USA",  # Add USA suffix
-                location_clean.replace(",", ""),  # Remove commas
             ]
-            
-            headers = {
-                "User-Agent": "NREL-RAG-SaaS/1.0"
-            }
             
             last_error = None
             for query_format in query_formats:
@@ -622,75 +677,23 @@ class NRELClient:
             Dictionary containing utility rate information
         """
         async with httpx.AsyncClient() as client:
-            # Try different parameter formats - NREL API v3 might use "lat" and "lon" (not "latitude"/"longitude")
-            # Format: "latitude,longitude" as address
-            location_str = f"{latitude},{longitude}"
-            
-            # Try 1: address parameter with lat/lon string
-            params_address = {
+            # NREL API v3 requires "lat" and "lon" parameters (address parameter deprecated 2025-02-25)
+            # Use lat/lon directly - this is the only supported format
+            params = {
                 "api_key": self.api_key,
-                "address": location_str,
+                "lat": str(latitude),
+                "lon": str(longitude),
                 "format": "json"
             }
             
             if sector:
-                params_address["sector"] = sector.lower()
+                params["sector"] = sector.lower()
             
             response = await client.get(
                 self.BASE_URL_ELECTRICITY,
-                params=params_address,
+                params=params,
                 timeout=30.0
             )
-            
-            # Try 2: lat and lon as separate parameters (if address doesn't work)
-            if response.status_code != 200:
-                params_latlon = {
-                    "api_key": self.api_key,
-                    "lat": str(latitude),
-                    "lon": str(longitude),
-                    "format": "json"
-                }
-                if sector:
-                    params_latlon["sector"] = sector.lower()
-                
-                response = await client.get(
-                    self.BASE_URL_ELECTRICITY,
-                    params=params_latlon,
-                    timeout=30.0
-                )
-            
-            # Try 3: latitude and longitude as separate parameters
-            if response.status_code != 200:
-                params_latlong = {
-                    "api_key": self.api_key,
-                    "latitude": str(latitude),
-                    "longitude": str(longitude),
-                    "format": "json"
-                }
-                if sector:
-                    params_latlong["sector"] = sector.lower()
-                
-                response = await client.get(
-                    self.BASE_URL_ELECTRICITY,
-                    params=params_latlong,
-                    timeout=30.0
-                )
-            
-            # Try 4: location parameter with lat/lon string
-            if response.status_code != 200:
-                params_location = {
-                    "api_key": self.api_key,
-                    "location": location_str,
-                    "format": "json"
-                }
-                if sector:
-                    params_location["sector"] = sector.lower()
-                
-                response = await client.get(
-                    self.BASE_URL_ELECTRICITY,
-                    params=params_location,
-                    timeout=30.0
-                )
             
             # Better error handling for 422 errors
             if response.status_code == 422:
@@ -700,13 +703,13 @@ class NRELClient:
                     error_msg = errors[0] if errors else error_data.get("error", {}).get("message", "Unknown error")
                     raise ValueError(
                         f"NREL API returned 422 Unprocessable Entity: {error_msg}. "
-                        f"Request params: location={location_str}, sector={sector}"
+                        f"Request params: lat={latitude}, lon={longitude}, sector={sector}"
                     )
                 except Exception:
                     raise ValueError(
                         f"NREL API returned 422 Unprocessable Entity. "
                         f"Response: {response.text[:500]}. "
-                        f"Request params: location={location_str}, sector={sector}"
+                        f"Request params: lat={latitude}, lon={longitude}, sector={sector}"
                     )
             
             response.raise_for_status()

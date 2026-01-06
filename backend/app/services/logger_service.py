@@ -192,7 +192,9 @@ class StructuredLogger:
         operation: str,
         key: str,
         cache_hit: bool,
-        ttl_seconds: Optional[int] = None
+        ttl_seconds: Optional[int] = None,
+        expired: Optional[bool] = None,
+        age_seconds: Optional[int] = None
     ):
         """
         Log cache operation.
@@ -202,6 +204,8 @@ class StructuredLogger:
             key: Cache key
             cache_hit: Whether cache hit occurred
             ttl_seconds: TTL in seconds (optional)
+            expired: Whether entry was expired (for get operations)
+            age_seconds: Age of expired entry in seconds (optional)
         """
         data = {
             "operation": operation,
@@ -211,6 +215,12 @@ class StructuredLogger:
         
         if ttl_seconds:
             data["ttl_seconds"] = ttl_seconds
+        
+        if expired is not None:
+            data["expired"] = expired
+        
+        if age_seconds is not None:
+            data["age_seconds"] = age_seconds
         
         self._log(LogLevel.DEBUG, "cache", data)
     

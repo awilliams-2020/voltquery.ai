@@ -81,7 +81,7 @@ class LocationService:
         llm = self.llm_service.get_llm()
         
         # Create prompt for location extraction
-        extraction_prompt = f"""Extract location information from this question about EV charging stations.
+        extraction_prompt = f"""Extract location information from this question.
 
 Question: "{question}"
 
@@ -264,7 +264,7 @@ Only return the JSON object, nothing else."""
                 ]
                 
                 headers = {
-                    "User-Agent": "NREL-RAG-SaaS/1.0"
+                    "User-Agent": "VoltQuery.ai/1.0"
                 }
                 
                 for query in query_formats:

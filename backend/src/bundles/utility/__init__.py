@@ -113,16 +113,24 @@ def get_tool(
             "---------------------\n"
             "You are a helpful assistant providing utility rate information from a public database. "
             "This is factual data about electricity rates, not financial advice. "
-            "If the context above is empty or contains no utility rate data, respond with: "
-            "'I do not have utility rate data available for this location. The data may not be available in the database, or the location may need to be indexed first.' "
-            "Otherwise, provide the utility rate information clearly and accurately.\n"
+            "IMPORTANT: Only respond with 'I do not have utility rate data available for this location. "
+            "The data may not be available in the database, or the location may need to be indexed first.' "
+            "if the context above is COMPLETELY EMPTY (no text, no data, just whitespace). "
+            "If the context contains ANY utility rate data (even if it's for different locations than requested), "
+            "you MUST provide that information. Always use the actual data from the context.\n"
+            "For comparison questions (e.g., 'which state has the cheapest rate', 'compare rates across states'), "
+            "you MUST analyze ALL the utility rate data provided in the context, extract rates from different locations, "
+            "group them by state if possible, and identify which state/location has the cheapest/most expensive rate. "
+            "If the data includes zip codes, you may need to infer states from zip codes or use the location information "
+            "provided in the metadata. Provide a clear answer with the state/location name and the rate.\n"
+            "For other questions, you can aggregate data from multiple locations or provide examples from the available data.\n"
             "Query: {query_str}\n"
             "Answer: "
         )
     )
     
-    # Create query engine (same pattern as transportation tool)
-    base_utility_query_engine = RetrieverQueryEngine.from_args(
+    # Create query engine
+    base_query_engine = RetrieverQueryEngine.from_args(
         retriever=utility_retriever,
         llm=llm,
         node_postprocessors=node_postprocessors,
@@ -146,30 +154,18 @@ def get_tool(
         def _query(self, query_bundle: QueryBundle) -> Response:
             """Synchronous query - delegate to base engine with debugging."""
             query_str = query_bundle.query_str
-            print(f"\n[UtilityTool] ===== DEBUG START (SYNC) =====")
-            print(f"[UtilityTool] Query: {query_str}")
             
             # Check retriever
             try:
                 nodes = self.retriever.retrieve(query_str)
-                print(f"[UtilityTool] Retriever found {len(nodes) if nodes else 0} nodes")
-                
-                # If no nodes, return helpful message
-                if not nodes or len(nodes) == 0:
-                    print(f"[UtilityTool] WARNING: No nodes found, returning helpful empty response")
-                    empty_response = Response(
-                        response="I do not have utility rate data available for this location. The data may not be available in the database, or the location may need to be indexed first.",
-                        source_nodes=[],
-                        metadata={}
-                    )
-                    print(f"[UtilityTool] ===== DEBUG END (NO DATA) =====\n")
-                    return empty_response
+                node_count = len(nodes) if nodes else 0
+                if node_count > 0:
+                    print(f"[UtilityTool] query='{query_str[:60]}...' | nodes={node_count}")
             except Exception as e:
                 print(f"[UtilityTool] ERROR retrieving nodes: {str(e)}")
             
             # Delegate to base engine
             response = self.base_engine._query(query_bundle)
-            self._debug_response(response, query_str)
             
             # Check if response is actually empty
             response_text = ""
@@ -179,159 +175,154 @@ def get_tool(
                 response_text = response.text if response.text else ""
             
             if not response_text or response_text.strip() == "" or response_text.strip() == "Empty Response":
-                print(f"[UtilityTool] Response is empty, creating helpful message")
+                print(f"[UtilityTool] empty_response | query='{query_str[:60]}...'")
                 helpful_response = Response(
                     response="I do not have utility rate data available for this location. The data may not be available in the database, or the location may need to be indexed first.",
                     source_nodes=response.source_nodes if hasattr(response, 'source_nodes') else [],
                     metadata=response.metadata if hasattr(response, 'metadata') else {}
                 )
-                print(f"[UtilityTool] ===== DEBUG END (SYNC) =====\n")
                 return helpful_response
             
-            print(f"[UtilityTool] ===== DEBUG END (SYNC) =====\n")
             return response
         
         async def _aquery(self, query_bundle: QueryBundle) -> Response:
-            """Async query with detailed debugging."""
+            """Async query with observability."""
             query_str = query_bundle.query_str
-            print(f"\n[UtilityTool] ===== DEBUG START =====")
-            print(f"[UtilityTool] Query: {query_str}")
             
-            # First, check what nodes the retriever finds
+            # Check if this is a comparison question
+            query_lower = query_str.lower()
+            is_comparison_question = any(keyword in query_lower for keyword in [
+                "which state", "which city", "cheapest", "cheaper", "most affordable", 
+                "lowest", "highest", "compare", "comparison", "best rate", "worst rate"
+            ])
+            
+            # Check what nodes the retriever finds
+            nodes = None
             try:
-                print(f"[UtilityTool] Checking retriever directly...")
-                print(f"[UtilityTool] Retriever filters: {self.retriever._filters if hasattr(self.retriever, '_filters') else 'N/A'}")
                 nodes = self.retriever.retrieve(query_str)
-                print(f"[UtilityTool] Retriever found {len(nodes) if nodes else 0} nodes")
+                node_count = len(nodes) if nodes else 0
                 
-                if nodes:
-                    for i, node in enumerate(nodes[:3]):  # Show first 3 nodes
-                        metadata = node.metadata if hasattr(node, "metadata") else {}
-                        node_text = node.text[:100] if hasattr(node, "text") and node.text else "No text"
-                        print(f"[UtilityTool] Node {i+1}:")
-                        print(f"  - Text preview: {node_text}")
-                        print(f"  - Metadata: {metadata}")
+                if node_count > 0:
+                    # Show key metadata from first node
+                    first_node = nodes[0]
+                    metadata = first_node.metadata if hasattr(first_node, "metadata") else {}
+                    zip_code = metadata.get('zip', 'N/A')
+                    utility_name = metadata.get('utility_name', 'N/A')
+                    print(f"[UtilityTool] query='{query_str[:50]}...' | nodes={node_count} | zip={zip_code} | utility={utility_name[:30]}")
                 else:
-                    print(f"[UtilityTool] WARNING: Retriever returned no nodes!")
+                    print(f"[UtilityTool] query='{query_str[:50]}...' | nodes=0 | checking_unfiltered")
                     # Try without filters to see if there are any utility rates at all
-                    print(f"[UtilityTool] Checking if ANY utility nodes exist (no filters)...")
                     try:
                         unfiltered_retriever = VectorIndexRetriever(
                             index=self.retriever._index if hasattr(self.retriever, '_index') else None,
-                            similarity_top_k=5,
+                            similarity_top_k=50 if is_comparison_question else 5,
                             filters=MetadataFilters(filters=[
                                 MetadataFilter(key="domain", value="utility", operator=FilterOperator.EQ)
                             ])
                         )
                         all_nodes = unfiltered_retriever.retrieve("electricity rate")
-                        print(f"[UtilityTool] Found {len(all_nodes) if all_nodes else 0} utility nodes total (no zip filter)")
-                        if all_nodes:
-                            for i, node in enumerate(all_nodes[:3]):
-                                metadata = node.metadata if hasattr(node, "metadata") else {}
-                                print(f"[UtilityTool] Sample node {i+1} zip: {metadata.get('zip', 'N/A')}")
+                        unfiltered_count = len(all_nodes) if all_nodes else 0
+                        
+                        if unfiltered_count > 0:
+                            print(f"[UtilityTool] unfiltered_nodes={unfiltered_count} | comparison={is_comparison_question}")
+                            # If this is a comparison question, use unfiltered retriever
+                            if is_comparison_question:
+                                self.retriever = unfiltered_retriever
+                                if hasattr(self.base_engine, 'retriever'):
+                                    self.base_engine.retriever = unfiltered_retriever
+                                nodes = all_nodes
                     except Exception as e2:
-                        print(f"[UtilityTool] Could not check unfiltered nodes: {str(e2)}")
+                        print(f"[UtilityTool] ERROR checking unfiltered: {str(e2)}")
             except Exception as e:
                 print(f"[UtilityTool] ERROR retrieving nodes: {str(e)}")
                 import traceback
                 traceback.print_exc()
             
-            # Check response synthesizer
-            if hasattr(self.base_engine, "response_synthesizer"):
-                print(f"[UtilityTool] Query engine has response_synthesizer: {type(self.base_engine.response_synthesizer)}")
-            else:
-                print(f"[UtilityTool] WARNING: Query engine has no response_synthesizer attribute")
+            # For comparison questions, try unfiltered retriever if no nodes found
+            if (not nodes or len(nodes) == 0) and is_comparison_question:
+                try:
+                    unfiltered_retriever = VectorIndexRetriever(
+                        index=self.retriever._index if hasattr(self.retriever, '_index') else None,
+                        similarity_top_k=50,
+                        filters=MetadataFilters(filters=[
+                            MetadataFilter(key="domain", value="utility", operator=FilterOperator.EQ)
+                        ])
+                    )
+                    nodes = unfiltered_retriever.retrieve(query_str)
+                    if nodes and len(nodes) > 0:
+                        print(f"[UtilityTool] comparison_fallback | nodes={len(nodes)}")
+                        self.retriever = unfiltered_retriever
+                        if hasattr(self.base_engine, 'retriever'):
+                            self.base_engine.retriever = unfiltered_retriever
+                except Exception as e2:
+                    print(f"[UtilityTool] ERROR unfiltered_retriever: {str(e2)}")
             
-            # Check if we have nodes before querying
-            nodes = self.retriever.retrieve(query_str)
-            if not nodes or len(nodes) == 0:
-                print(f"[UtilityTool] WARNING: No nodes found, returning helpful empty response")
-                # Create a response indicating no data available
-                empty_response = Response(
-                    response="I do not have utility rate data available for this location. The data may not be available in the database, or the location may need to be indexed first.",
-                    source_nodes=[],
-                    metadata={}
-                )
-                print(f"[UtilityTool] ===== DEBUG END (NO DATA) =====\n")
-                return empty_response
-            
-            # Now try the actual query
+            # Execute query
             try:
-                print(f"[UtilityTool] Calling base query engine...")
                 response = await self.base_engine._aquery(query_bundle)
-                print(f"[UtilityTool] Base query engine returned response")
                 
-                self._debug_response(response, query_str)
-                
-                # Check if response is actually empty or just says "Empty Response"
+                # Check if we have nodes but LLM returned empty/unhelpful response
+                has_source_nodes = hasattr(response, 'source_nodes') and response.source_nodes and len(response.source_nodes) > 0
                 response_text = ""
                 if hasattr(response, "response"):
                     response_text = str(response.response) if response.response else ""
                 elif hasattr(response, "text"):
                     response_text = response.text if response.text else ""
                 
-                if not response_text or response_text.strip() == "" or response_text.strip() == "Empty Response":
-                    print(f"[UtilityTool] Response is empty, creating helpful message")
-                    helpful_response = Response(
-                        response="I do not have utility rate data available for this location. The data may not be available in the database, or the location may need to be indexed first.",
-                        source_nodes=response.source_nodes if hasattr(response, 'source_nodes') else [],
-                        metadata=response.metadata if hasattr(response, 'metadata') else {}
-                    )
-                    print(f"[UtilityTool] ===== DEBUG END =====\n")
-                    return helpful_response
+                # If we have source nodes but response says "I do not have", extract data from nodes instead
+                if has_source_nodes and response_text and "I do not have utility rate data" in response_text:
+                    print(f"[UtilityTool] llm_fallback | source_nodes={len(response.source_nodes)} | extracting_from_metadata")
+                    # Extract utility rate data from source nodes
+                    utility_info = []
+                    for node in response.source_nodes:
+                        if hasattr(node, 'metadata'):
+                            meta = node.metadata
+                            utility_name = meta.get('utility_name', 'Unknown')
+                            zip_code = meta.get('zip', meta.get('location', 'Unknown'))
+                            residential_rate = meta.get('residential_rate', None)
+                            commercial_rate = meta.get('commercial_rate', None)
+                            industrial_rate = meta.get('industrial_rate', None)
+                            
+                            info_parts = [f"Utility: {utility_name}", f"Location: {zip_code}"]
+                            if residential_rate is not None:
+                                info_parts.append(f"Residential Rate: ${residential_rate:.4f}/kWh")
+                            if commercial_rate is not None:
+                                info_parts.append(f"Commercial Rate: ${commercial_rate:.4f}/kWh")
+                            if industrial_rate is not None:
+                                info_parts.append(f"Industrial Rate: ${industrial_rate:.4f}/kWh")
+                            
+                            utility_info.append(" | ".join(info_parts))
+                    
+                    if utility_info:
+                        extracted_response = "Current electricity rates:\n" + "\n".join(utility_info)
+                        return Response(
+                            response=extracted_response,
+                            source_nodes=response.source_nodes,
+                            metadata=response.metadata if hasattr(response, 'metadata') else {}
+                        )
                 
-                print(f"[UtilityTool] ===== DEBUG END =====\n")
+                # Check if response is actually empty
+                if not response_text or response_text.strip() == "" or response_text.strip() == "Empty Response":
+                    if not has_source_nodes:
+                        print(f"[UtilityTool] empty_response | no_source_nodes")
+                        helpful_response = Response(
+                            response="I do not have utility rate data available for this location. The data may not be available in the database, or the location may need to be indexed first.",
+                            source_nodes=[],
+                            metadata=response.metadata if hasattr(response, 'metadata') else {}
+                        )
+                        return helpful_response
+                
                 return response
                 
             except Exception as e:
-                print(f"[UtilityTool] ERROR in query: {str(e)}")
+                print(f"[UtilityTool] ERROR query: {str(e)}")
                 import traceback
                 traceback.print_exc()
-                print(f"[UtilityTool] ===== DEBUG END (ERROR) =====\n")
                 raise e
-        
-        def _debug_response(self, response: Response, query_str: str):
-            """Debug helper to inspect response object."""
-            # Check response structure
-            print(f"[UtilityTool] Response type: {type(response)}")
-            print(f"[UtilityTool] Response attributes: {[a for a in dir(response) if not a.startswith('__')]}")
-            
-            # Check if response has source_nodes
-            if hasattr(response, "source_nodes"):
-                print(f"[UtilityTool] Response has {len(response.source_nodes) if response.source_nodes else 0} source_nodes")
-            
-            # Extract response text
-            response_text = ""
-            if hasattr(response, "response"):
-                response_text = str(response.response) if response.response else ""
-                print(f"[UtilityTool] response.response: {response_text[:200] if response_text else 'EMPTY'}")
-            elif hasattr(response, "text"):
-                response_text = response.text if response.text else ""
-                print(f"[UtilityTool] response.text: {response_text[:200] if response_text else 'EMPTY'}")
-            else:
-                response_text = str(response) if response else ""
-                print(f"[UtilityTool] str(response): {response_text[:200] if response_text else 'EMPTY'}")
-            
-            print(f"[UtilityTool] Response text length: {len(response_text)}")
-            print(f"[UtilityTool] Response text is empty: {not response_text or response_text.strip() == ''}")
-            
-            if not response_text or response_text.strip() == "":
-                print(f"[UtilityTool] ERROR: Empty response detected!")
-                print(f"[UtilityTool] Full response object: {response}")
-                
-                # Check if response has any other attributes that might contain data
-                for attr in dir(response):
-                    if not attr.startswith("_"):
-                        try:
-                            attr_value = getattr(response, attr)
-                            if attr_value and attr not in ["response", "text"]:
-                                print(f"[UtilityTool] response.{attr}: {str(attr_value)[:100]}")
-                        except Exception:
-                            pass
     
     # Wrap the query engine
     wrapped_engine = UtilityQueryEngineWrapper(
-        base_utility_query_engine,
+        base_query_engine,
         utility_retriever,
         callback_manager=callback_manager
     )

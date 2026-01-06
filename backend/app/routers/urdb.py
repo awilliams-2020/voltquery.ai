@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from pydantic import BaseModel
 from typing import Optional, List
+import uuid
 from app.services.urdb_service import URDBService
 from app.services.llm_service import LLMService
 from app.middleware.auth import get_current_user
@@ -8,6 +9,9 @@ from app.models.user import User
 
 router = APIRouter()
 llm_service = LLMService()
+
+# Constants
+VALID_SECTORS = ["residential", "commercial", "industrial"]
 
 
 class URDBFetchRequest(BaseModel):
@@ -93,8 +97,6 @@ async def fetch_urdb(
     
     Returns immediately with a task ID. Use /api/urdb/status/{task_id} to check progress.
     """
-    import uuid
-    
     # Validate zip codes
     invalid_zips = [z for z in request.zip_codes if not z.isdigit() or len(z) != 5]
     if invalid_zips:
@@ -104,11 +106,10 @@ async def fetch_urdb(
         )
     
     # Validate sector
-    valid_sectors = ["residential", "commercial", "industrial"]
-    if request.sector and request.sector.lower() not in valid_sectors:
+    if request.sector and request.sector.lower() not in VALID_SECTORS:
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid sector. Must be one of: {', '.join(valid_sectors)}"
+            detail=f"Invalid sector. Must be one of: {', '.join(VALID_SECTORS)}"
         )
     
     # Generate task ID
@@ -161,8 +162,6 @@ async def fetch_urdb_by_state(
     
     Note: This can take a very long time for large states. Use limit parameter for testing.
     """
-    import uuid
-    
     # Validate state
     if len(request.state) != 2:
         raise HTTPException(

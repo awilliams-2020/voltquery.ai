@@ -15,6 +15,14 @@ interface RAGResponse {
   answer: string
   sources: Array<{ text: string; metadata: any }>
   num_sources: number
+  detected_location?: {
+    type?: string
+    zip_code?: string
+    city?: string
+    state?: string
+  }
+  reranked?: boolean
+  utility_rates?: any
 }
 
 interface RAGQueryFormProps {
@@ -82,29 +90,6 @@ export function RAGQueryForm({ onQueryComplete }: RAGQueryFormProps) {
     }
   }, [])
 
-  const startProgressiveLoading = () => {
-    let currentIndex = 0
-    
-    const advanceStage = () => {
-      if (currentIndex < LOADING_STAGES.length) {
-        const currentStage = LOADING_STAGES[currentIndex]
-        setLoadingStage(currentStage.stage)
-        
-        if (currentIndex < LOADING_STAGES.length - 1) {
-          const nextStage = LOADING_STAGES[currentIndex + 1]
-          const delay = nextStage.delay - currentStage.delay
-          stageTimeoutRef.current = setTimeout(() => {
-            currentIndex++
-            advanceStage()
-          }, delay)
-        }
-        // If we're at the last stage, stay there until response arrives
-      }
-    }
-    
-    advanceStage()
-  }
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!question.trim()) return
@@ -125,13 +110,10 @@ export function RAGQueryForm({ onQueryComplete }: RAGQueryFormProps) {
     if (stageTimeoutRef.current) {
       clearTimeout(stageTimeoutRef.current)
     }
-    
-    // Start progressive loading stages
-    startProgressiveLoading()
 
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
-      const response = await fetch(`${apiUrl}/api/rag/query`, {
+      const response = await fetch(`${apiUrl}/api/rag/query-stream`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -146,24 +128,99 @@ export function RAGQueryForm({ onQueryComplete }: RAGQueryFormProps) {
       })
 
       if (!response.ok) {
-        const errorData = await response.json()
+        const errorData = await response.json().catch(() => ({ detail: "Failed to process query" }))
         throw new Error(errorData.detail || "Failed to process query")
       }
 
-      const data = await response.json()
-      setResponse(data)
-      
-      // Save response to sessionStorage
-      if (typeof window !== "undefined") {
-        try {
-          sessionStorage.setItem(STORAGE_KEY_RESPONSE, JSON.stringify(data))
-        } catch (err) {
-          console.error("Failed to save response to sessionStorage:", err)
-        }
+      // Handle SSE stream
+      const reader = response.body?.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ""
+      let currentResponse: Partial<RAGResponse> = {
+        question: question,
+        answer: "",
+        sources: [],
+        num_sources: 0,
       }
-      
-      if (onQueryComplete) {
-        onQueryComplete()
+
+      if (!reader) {
+        throw new Error("Failed to get response stream")
+      }
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split("\n\n")
+        buffer = lines.pop() || "" // Keep incomplete line in buffer
+
+        for (const line of lines) {
+          if (line.trim() === "") continue
+
+          const [eventLine, dataLine] = line.split("\n")
+          if (!eventLine || !dataLine) continue
+
+          const eventMatch = eventLine.match(/^event: (.+)$/)
+          const dataMatch = dataLine.match(/^data: (.+)$/)
+
+          if (!eventMatch || !dataMatch) continue
+
+          const eventType = eventMatch[1]
+          const data = JSON.parse(dataMatch[1])
+
+          // Handle different event types
+          if (eventType === "status") {
+            const stage = data.stage
+            if (stage === "analyzing") setLoadingStage("analyzing")
+            else if (stage === "searching") setLoadingStage("searching")
+            else if (stage === "retrieving") setLoadingStage("retrieving")
+            else if (stage === "synthesizing") setLoadingStage("generating")
+          } else if (eventType === "tool") {
+            // Tool call notification - could show which tool is being used
+            console.log(`Tool called: ${data.tool}`)
+          } else if (eventType === "chunk") {
+            // Stream answer chunks (if supported)
+            currentResponse.answer = (currentResponse.answer || "") + data.text
+            const chunkResponse: RAGResponse = {
+              question: currentResponse.question || question,
+              answer: currentResponse.answer || "",
+              sources: currentResponse.sources || [],
+              num_sources: currentResponse.num_sources || 0,
+              detected_location: currentResponse.detected_location,
+              reranked: currentResponse.reranked,
+              utility_rates: currentResponse.utility_rates,
+            }
+            setResponse(chunkResponse)
+          } else if (eventType === "done") {
+            // Final response
+            const finalResponse: RAGResponse = {
+              question: data.question || question,
+              answer: data.answer || "",
+              sources: data.sources || [],
+              num_sources: data.num_sources || 0,
+              detected_location: data.detected_location,
+              reranked: data.reranked,
+              utility_rates: data.utility_rates,
+            }
+            setResponse(finalResponse)
+            
+            // Save response to sessionStorage
+            if (typeof window !== "undefined") {
+              try {
+                sessionStorage.setItem(STORAGE_KEY_RESPONSE, JSON.stringify(finalResponse))
+              } catch (err) {
+                console.error("Failed to save response to sessionStorage:", err)
+              }
+            }
+            
+            if (onQueryComplete) {
+              onQueryComplete()
+            }
+          } else if (eventType === "error") {
+            throw new Error(data.message || "An error occurred")
+          }
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "An error occurred")

@@ -1,4 +1,4 @@
-# Backend - NREL RAG SaaS API
+# Backend - VoltQuery.ai API
 
 FastAPI backend for EV Infrastructure RAG SaaS application.
 

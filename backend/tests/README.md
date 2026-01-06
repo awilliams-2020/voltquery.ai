@@ -13,6 +13,7 @@ pytest tests/ -v
 Run specific test file:
 ```bash
 pytest tests/test_rag_prompts.py -v
+pytest tests/test_query_routing.py -v  # Test query routing logic
 ```
 
 Run with coverage:
@@ -45,9 +46,22 @@ pytest tests/ --cov=app.services.rag_service --cov-report=html
 - Tests that common queries generate expected sub-questions
 - Verifies question structure matches expectations
 
-### 6. Integration Tests (`TestRAGServiceIntegration`)
+### 6. Query Routing Tests (`TestQueryRouting`)
+- Tests query keyword detection (transportation, utility, building efficiency)
+- Verifies tool routing logic without requiring full application stack
+- Tests location extraction from queries
+- Fast unit tests that can run without containers
+
+### 7. Integration Tests (`TestRAGServiceIntegration`)
 - Tests RAG service with mocked dependencies
 - Verifies metadata structure for indexed documents
+
+## Regression Testing
+
+For regression testing with varying queries, see:
+- **Unit Tests**: `pytest tests/test_query_routing.py` - Fast, no containers needed
+- **Manual Testing**: See `docs/MANUAL_REGRESSION_TESTING.md` for testing against running containers
+- **Test Queries**: See `docs/TEST_QUERIES.json` for a list of test queries
 
 ## Adding New Tests
 
