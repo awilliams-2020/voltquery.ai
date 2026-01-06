@@ -554,6 +554,7 @@ Both services include:
 - Tool name mapping corrects LLM routing errors
 - Circuit breakers prevent cascading failures
 - Comprehensive logging for debugging
+- **Rate Limit Handling**: All external APIs (NREL Stations, Utility Rates, PVWatts, REopt) handle HTTP 429 rate limit errors with descriptive messages, rate limit header extraction, and proper error propagation
 
 ---
 

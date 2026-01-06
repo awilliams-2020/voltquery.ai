@@ -9,6 +9,7 @@ This bundle provides:
 """
 
 from typing import Optional, List
+import re
 from llama_index.core.tools import QueryEngineTool
 from llama_index.core.query_engine import RetrieverQueryEngine, BaseQueryEngine
 from llama_index.core.retrievers import VectorIndexRetriever
@@ -19,8 +20,10 @@ from llama_index.core.response_synthesizers import get_response_synthesizer
 from llama_index.core.response_synthesizers.type import ResponseMode
 from llama_index.core.prompts import PromptTemplate
 from llama_index.core.base.response.schema import Response
-from llama_index.core.schema import QueryBundle
+from llama_index.core.schema import QueryBundle, TextNode, NodeWithScore
 from app.services.vector_store_service import VectorStoreService
+from app.services.urdb_service import URDBService
+from app.services.nrel_client import NRELClient
 
 
 def get_tool(
@@ -138,14 +141,21 @@ def get_tool(
         callback_manager=callback_manager
     )
     
-    # Wrap query engine to add debug logging
+    # Initialize URDB service and NREL client for fallback fetching
+    urdb_service = URDBService(llm_mode="local")
+    nrel_client = NRELClient()
+    
+    # Wrap query engine to add debug logging and URDB fallback
     class UtilityQueryEngineWrapper(BaseQueryEngine):
-        """Wrapper to add debug logging for utility query engine."""
+        """Wrapper to add debug logging and URDB API fallback for utility query engine."""
         
-        def __init__(self, base_engine, retriever, callback_manager=None):
+        def __init__(self, base_engine, retriever, urdb_service, nrel_client, vector_store_service, callback_manager=None):
             super().__init__(callback_manager=callback_manager)
             self.base_engine = base_engine
             self.retriever = retriever
+            self.urdb_service = urdb_service
+            self.nrel_client = nrel_client
+            self.vector_store_service = vector_store_service
         
         def _get_prompt_modules(self):
             """Get prompt sub-modules. Returns empty dict since we delegate to base engine."""
@@ -185,9 +195,164 @@ def get_tool(
             
             return response
         
+        def _extract_location_from_query(self, query_str: str) -> Optional[str]:
+            """Extract location (zip code or city, state) from query string."""
+            # Try to extract zip code (5 digits)
+            zip_match = re.search(r'\b\d{5}\b', query_str)
+            if zip_match:
+                return zip_match.group(0)
+            
+            # Try to extract city, state pattern (e.g., "Atlanta, Georgia" or "Denver, CO")
+            city_state_match = re.search(r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*),\s*([A-Z]{2}|[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b', query_str)
+            if city_state_match:
+                return f"{city_state_match.group(1)}, {city_state_match.group(2)}"
+            
+            return None
+        
+        async def _check_location_match(self, queried_location: Optional[str], nodes: List) -> bool:
+            """Check if any returned nodes match the queried location."""
+            if not queried_location or not nodes:
+                return False
+            
+            # Get zip code for queried location
+            queried_zip = None
+            if queried_location.isdigit() and len(queried_location) == 5:
+                queried_zip = queried_location
+            else:
+                # Try to geocode city/state to zip code
+                try:
+                    if ", " in queried_location:
+                        city, state = queried_location.split(", ", 1)
+                        queried_zip = await self.nrel_client._get_zip_from_city_state(city, state)
+                    else:
+                        # Try full geocoding
+                        lat, lon = await self.nrel_client._geocode_location(queried_location)
+                        # For now, we can't reverse geocode lat/lon to zip easily
+                        # So we'll be more lenient - if we can't geocode, assume match
+                        # This prevents false negatives
+                        return True  # Assume match if we can't verify
+                except Exception:
+                    # If geocoding fails, be lenient - assume match
+                    # This prevents false negatives when geocoding is unavailable
+                    return True
+            
+            if not queried_zip:
+                return True  # Can't verify, assume match
+            
+            # Check if any node has matching zip
+            for node in nodes:
+                if hasattr(node, 'metadata'):
+                    node_zip = node.metadata.get('zip', '')
+                    if node_zip == queried_zip:
+                        return True
+            
+            return False
+        
+        async def _fetch_rates_from_urdb(self, location: str) -> Optional[str]:
+            """Fetch utility rates from URDB API for a given location."""
+            try:
+                from app.services.document_service import DocumentService
+                document_service = DocumentService()
+                
+                # Extract zip code from location
+                zip_code = None
+                if location.isdigit() and len(location) == 5:
+                    zip_code = location
+                else:
+                    # Try to geocode city/state to zip code
+                    try:
+                        if ", " in location:
+                            city, state = location.split(", ", 1)
+                            zip_code = await self.nrel_client._get_zip_from_city_state(city, state)
+                        else:
+                            # Try geocoding to lat/lon, then to zip
+                            lat, lon = await self.nrel_client._geocode_location(location)
+                            # For now, we need zip code - could enhance URDBService to accept lat/lon
+                            # But for simplicity, let's try to reverse geocode to zip
+                            # This is a limitation - we'd need to add reverse geocoding
+                            pass
+                    except Exception as e:
+                        print(f"[UtilityTool] ERROR geocoding location: {str(e)}")
+                        pass
+                
+                if not zip_code:
+                    print(f"[UtilityTool] Could not determine zip code for location: {location}")
+                    return None
+                
+                # Fetch rates for residential sector first (most common query)
+                rates = await self.urdb_service.fetch_urdb_by_zip(zip_code, sector="residential", limit=5)
+                if not rates or len(rates) == 0:
+                    # Try commercial if residential fails
+                    rates = await self.urdb_service.fetch_urdb_by_zip(zip_code, sector="commercial", limit=5)
+                
+                if not rates or len(rates) == 0:
+                    return None
+                
+                # Use document_service to convert URDB data to documents (same format as vector store)
+                # This ensures consistency in how rates are extracted and formatted
+                documents = document_service.utility_rates_to_documents(rates[0], location=zip_code)
+                
+                if not documents or len(documents) == 0:
+                    return None
+                
+                # Index the fetched documents to vector store for future queries
+                try:
+                    index = self.vector_store_service.get_index()
+                    index.insert(documents)
+                    print(f"[UtilityTool] indexed_urdb_data | zip={zip_code} | documents={len(documents)}")
+                except Exception as index_error:
+                    # Don't fail the query if indexing fails - just log it
+                    print(f"[UtilityTool] WARNING indexing_failed | zip={zip_code} | error={str(index_error)[:100]}")
+                
+                # Extract formatted text and metadata from the document
+                doc = documents[0]
+                formatted_text = doc.text if hasattr(doc, 'text') else str(doc)
+                metadata = doc.metadata if hasattr(doc, 'metadata') else {}
+                
+                # Build response similar to vector store format
+                utility_name = metadata.get('utility_name', 'Unknown')
+                residential_rate = metadata.get('residential_rate')
+                commercial_rate = metadata.get('commercial_rate')
+                industrial_rate = metadata.get('industrial_rate')
+                
+                info_parts = [f"Utility: {utility_name}", f"Location: {zip_code}"]
+                if residential_rate is not None:
+                    try:
+                        rate_val = float(residential_rate)
+                        info_parts.append(f"Residential Rate: ${rate_val:.4f}/kWh")
+                    except (ValueError, TypeError):
+                        info_parts.append(f"Residential Rate: ${residential_rate}/kWh")
+                if commercial_rate is not None:
+                    try:
+                        rate_val = float(commercial_rate)
+                        info_parts.append(f"Commercial Rate: ${rate_val:.4f}/kWh")
+                    except (ValueError, TypeError):
+                        info_parts.append(f"Commercial Rate: ${commercial_rate}/kWh")
+                if industrial_rate is not None:
+                    try:
+                        rate_val = float(industrial_rate)
+                        info_parts.append(f"Industrial Rate: ${rate_val:.4f}/kWh")
+                    except (ValueError, TypeError):
+                        info_parts.append(f"Industrial Rate: ${industrial_rate}/kWh")
+                
+                if len(info_parts) > 2:  # More than just utility and location
+                    return "Current electricity rates:\n" + " | ".join(info_parts)
+                
+                # Fallback to formatted text from document
+                return formatted_text
+                
+            except Exception as e:
+                print(f"[UtilityTool] ERROR fetching from URDB: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                return None
+        
         async def _aquery(self, query_bundle: QueryBundle) -> Response:
-            """Async query with observability."""
+            """Async query with observability and URDB fallback."""
             query_str = query_bundle.query_str
+            
+            # Extract location from query
+            queried_location = self._extract_location_from_query(query_str)
             
             # Check if this is a comparison question
             query_lower = query_str.lower()
@@ -209,6 +374,21 @@ def get_tool(
                     zip_code = metadata.get('zip', 'N/A')
                     utility_name = metadata.get('utility_name', 'N/A')
                     print(f"[UtilityTool] query='{query_str[:50]}...' | nodes={node_count} | zip={zip_code} | utility={utility_name[:30]}")
+                    
+                    # Check if queried location matches returned nodes
+                    if queried_location and not is_comparison_question:
+                        location_matches = await self._check_location_match(queried_location, nodes)
+                        if not location_matches:
+                            print(f"[UtilityTool] location_mismatch | queried={queried_location} | found_zip={zip_code} | fetching_from_urdb")
+                            # Try fetching from URDB API
+                            urdb_response = await self._fetch_rates_from_urdb(queried_location)
+                            if urdb_response:
+                                node = TextNode(text=urdb_response)
+                                node_with_score = NodeWithScore(node=node, score=1.0)
+                                return Response(
+                                    response=urdb_response,
+                                    source_nodes=[node_with_score]
+                                )
                 else:
                     print(f"[UtilityTool] query='{query_str[:50]}...' | nodes=0 | checking_unfiltered")
                     # Try without filters to see if there are any utility rates at all
@@ -305,6 +485,18 @@ def get_tool(
                 if not response_text or response_text.strip() == "" or response_text.strip() == "Empty Response":
                     if not has_source_nodes:
                         print(f"[UtilityTool] empty_response | no_source_nodes")
+                        # Try fetching from URDB API as fallback
+                        if queried_location and not is_comparison_question:
+                            print(f"[UtilityTool] attempting_urdb_fallback | location={queried_location}")
+                            urdb_response = await self._fetch_rates_from_urdb(queried_location)
+                            if urdb_response:
+                                node = TextNode(text=urdb_response)
+                                node_with_score = NodeWithScore(node=node, score=1.0)
+                                return Response(
+                                    response=urdb_response,
+                                    source_nodes=[node_with_score]
+                                )
+                        
                         helpful_response = Response(
                             response="I do not have utility rate data available for this location. The data may not be available in the database, or the location may need to be indexed first.",
                             source_nodes=[],
@@ -324,6 +516,9 @@ def get_tool(
     wrapped_engine = UtilityQueryEngineWrapper(
         base_query_engine,
         utility_retriever,
+        urdb_service,
+        nrel_client,
+        vector_store_service,
         callback_manager=callback_manager
     )
     

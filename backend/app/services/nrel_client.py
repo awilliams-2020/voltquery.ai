@@ -1,10 +1,12 @@
 import os
+import time
 import httpx
 from typing import Dict, List, Any, Optional, Tuple
 from pydantic_settings import BaseSettings
 from datetime import timedelta
 from app.services.cache_service import get_cache_service
 from app.services.circuit_breaker import get_breaker_manager
+from app.services.logger_service import get_logger
 
 
 class Settings(BaseSettings):
@@ -33,6 +35,43 @@ class NRELClient:
     BASE_URL_PVWATTS = "https://developer.nrel.gov/api/pvwatts/v8.json"
     GEOCODING_URL = "https://nominatim.openstreetmap.org/search"  # Free geocoding service
     
+    def _handle_rate_limit_error(self, response, api_name: str, context: str = ""):
+        """
+        Handle 429 rate limit errors from NREL APIs.
+        
+        Args:
+            response: HTTP response object
+            api_name: Name of the API (e.g., "NREL Stations API", "NREL PVWatts API")
+            context: Additional context string for error messages
+            
+        Raises:
+            ValueError: With descriptive rate limit error message
+        """
+        if response.status_code == 429:
+            try:
+                error_data = response.json()
+                error_msg = error_data.get("error", {}).get("message", "Rate limit exceeded")
+                # Get rate limit info from headers if available
+                rate_limit_info = ""
+                if "X-RateLimit-Limit" in response.headers:
+                    rate_limit = response.headers.get("X-RateLimit-Limit", "unknown")
+                    rate_remaining = response.headers.get("X-RateLimit-Remaining", "unknown")
+                    rate_limit_info = f" Rate limit: {rate_remaining}/{rate_limit}"
+                print(f"ERROR: {api_name} rate limit exceeded: {error_msg}{rate_limit_info}")
+                raise ValueError(
+                    f"{api_name} rate limit exceeded (429). {error_msg} "
+                    f"Rate limits reset on a rolling hourly basis. Please wait before trying again."
+                    f"{' ' + context if context else ''}"
+                )
+            except Exception as e:
+                if isinstance(e, ValueError):
+                    raise
+                raise ValueError(
+                    f"{api_name} rate limit exceeded (429). "
+                    f"Rate limits reset on a rolling hourly basis. Please wait before trying again."
+                    f"{' ' + context if context else ''}"
+                ) from e
+    
     def __init__(self):
         settings = Settings()
         self.api_key = settings.nrel_api_key
@@ -42,6 +81,7 @@ class NRELClient:
         # Initialize cache and circuit breakers
         self.cache = get_cache_service()
         self.breaker_manager = get_breaker_manager()
+        self.logger = get_logger("nrel_client", log_level="DEBUG")
         
         # Create circuit breakers for different API endpoints
         self.stations_breaker = self.breaker_manager.get_breaker(
@@ -73,26 +113,29 @@ class NRELClient:
         """
         Internal geocoding implementation.
         """
-        async with httpx.AsyncClient() as client:
-            # Use Nominatim to geocode zip code
-            params = {
-                "postalcode": zip_code,
-                "country": "US",
-                "format": "json",
-                "limit": 1
-            }
-            
-            headers = {
-                "User-Agent": "VoltQuery.ai/1.0"  # Required by Nominatim
-            }
-            
-            try:
+        start_time = time.time()
+        
+        try:
+            async with httpx.AsyncClient() as client:
+                # Use Nominatim to geocode zip code
+                params = {
+                    "postalcode": zip_code,
+                    "country": "US",
+                    "format": "json",
+                    "limit": 1
+                }
+                
+                headers = {
+                    "User-Agent": "VoltQuery.ai/1.0"  # Required by Nominatim
+                }
+                
                 response = await client.get(
                     self.GEOCODING_URL,
                     params=params,
                     headers=headers,
                     timeout=10.0
                 )
+                
                 response.raise_for_status()
                 data = response.json()
                 
@@ -111,11 +154,15 @@ class NRELClient:
                 lat = float(first_result["lat"])
                 lon = float(first_result["lon"])
                 
+                elapsed = time.time() - start_time
+                self.logger.logger.debug(f"Geocoded zip {zip_code} in {elapsed:.2f}s -> ({lat}, {lon})")
                 return (lat, lon)
-            except Exception as e:
-                raise ValueError(
-                    f"Failed to geocode zip code {zip_code}: {str(e)}"
-                ) from e
+        except Exception as e:
+            elapsed = time.time() - start_time
+            self.logger.logger.warning(f"Failed to geocode zip {zip_code} after {elapsed:.2f}s: {str(e)}")
+            raise ValueError(
+                f"Failed to geocode zip code {zip_code}: {str(e)}"
+            ) from e
     
     async def _geocode_zip_code(self, zip_code: str) -> Tuple[float, float]:
         """
@@ -186,6 +233,8 @@ class NRELClient:
         """
         Internal geocoding implementation.
         """
+        start_time = time.time()
+        
         # Check if it's already lat/long format
         if "," in location:
             parts = location.split(",")
@@ -313,12 +362,17 @@ class NRELClient:
                     lat = float(first_result["lat"])
                     lon = float(first_result["lon"])
                     
+                    elapsed = time.time() - start_time
+                    self.logger.logger.debug(f"Geocoded location '{location}' in {elapsed:.2f}s -> ({lat}, {lon})")
                     return (lat, lon)
                 except Exception as e:
                     last_error = str(e)
+                    self.logger.logger.debug(f"Geocoding format failed for '{query_format}': {str(e)}")
                     continue
             
             # If all formats failed, raise the last error
+            elapsed = time.time() - start_time
+            self.logger.logger.warning(f"Failed to geocode location '{location}' after {elapsed:.2f}s: {last_error}")
             raise ValueError(
                 f"Failed to geocode location '{location}' after trying multiple formats. Last error: {last_error}"
             )
@@ -411,6 +465,13 @@ class NRELClient:
                 timeout=30.0
             )
             
+            # Handle rate limit errors (429)
+            self._handle_rate_limit_error(
+                response,
+                "NREL Stations API",
+                f"Request params: latitude={latitude}, longitude={longitude}, limit={limit}"
+            )
+            
             # Better error handling for 422 errors
             if response.status_code == 422:
                 try:
@@ -469,6 +530,13 @@ class NRELClient:
                 f"{self.BASE_URL_STATIONS}.json",
                 params=params,
                 timeout=60.0  # Longer timeout for large requests
+            )
+            
+            # Handle rate limit errors (429)
+            self._handle_rate_limit_error(
+                response,
+                "NREL Stations API",
+                f"Request params: state={state}, limit={limit}, offset={offset}"
             )
             
             # Better error handling for 422 errors
@@ -695,6 +763,13 @@ class NRELClient:
                 timeout=30.0
             )
             
+            # Handle rate limit errors (429)
+            self._handle_rate_limit_error(
+                response,
+                "NREL Utility Rates API",
+                f"Request params: lat={latitude}, lon={longitude}, sector={sector}"
+            )
+            
             # Better error handling for 422 errors
             if response.status_code == 422:
                 try:
@@ -777,6 +852,13 @@ class NRELClient:
                     self.BASE_URL_PVWATTS,
                     params=params,
                     timeout=30.0
+                )
+                
+                # Handle rate limit errors (429)
+                self._handle_rate_limit_error(
+                    response,
+                    "NREL PVWatts API",
+                    f"Request params: lat={lat}, lon={lon}, system_capacity={system_capacity}"
                 )
                 
                 # Handle 422 errors (validation errors)

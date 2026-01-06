@@ -44,8 +44,6 @@ const LOADING_STAGES: Array<{ stage: LoadingStage; message: string; delay: numbe
 ]
 
 const STORAGE_KEY_RESPONSE = "rag-last-response"
-const STORAGE_KEY_QUESTION = "rag-last-question"
-const STORAGE_KEY_ZIPCODE = "rag-last-zipcode"
 
 export function RAGQueryForm({ onQueryComplete }: RAGQueryFormProps) {
   const { user } = useUser()
@@ -53,27 +51,20 @@ export function RAGQueryForm({ onQueryComplete }: RAGQueryFormProps) {
   const [zipCode, setZipCode] = useState("")
   const [loading, setLoading] = useState(false)
   const [loadingStage, setLoadingStage] = useState<LoadingStage>(null)
+  const [loadingMessage, setLoadingMessage] = useState<string>("Processing your question...")
   const [response, setResponse] = useState<RAGResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const stageTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Restore response from sessionStorage on mount
+  // Restore response from sessionStorage on mount (only restore results, not input)
   useEffect(() => {
     if (typeof window !== "undefined") {
       try {
         const savedResponse = sessionStorage.getItem(STORAGE_KEY_RESPONSE)
-        const savedQuestion = sessionStorage.getItem(STORAGE_KEY_QUESTION)
-        const savedZipCode = sessionStorage.getItem(STORAGE_KEY_ZIPCODE)
         
         if (savedResponse) {
           const parsedResponse = JSON.parse(savedResponse)
           setResponse(parsedResponse)
-        }
-        if (savedQuestion) {
-          setQuestion(savedQuestion)
-        }
-        if (savedZipCode) {
-          setZipCode(savedZipCode)
         }
       } catch (err) {
         console.error("Failed to restore response from sessionStorage:", err)
@@ -90,6 +81,7 @@ export function RAGQueryForm({ onQueryComplete }: RAGQueryFormProps) {
     }
   }, [])
 
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!question.trim()) return
@@ -98,12 +90,17 @@ export function RAGQueryForm({ onQueryComplete }: RAGQueryFormProps) {
     setError(null)
     setResponse(null)
     setLoadingStage("analyzing")
+    setLoadingMessage("Analyzing your question...")
     
-    // Clear sessionStorage for new query
+    // Clear inputs after submission
+    const submittedQuestion = question
+    const submittedZipCode = zipCode
+    setQuestion("")
+    setZipCode("")
+    
+    // Clear sessionStorage for new query (only store response, not input)
     if (typeof window !== "undefined") {
       sessionStorage.removeItem(STORAGE_KEY_RESPONSE)
-      sessionStorage.setItem(STORAGE_KEY_QUESTION, question)
-      sessionStorage.setItem(STORAGE_KEY_ZIPCODE, zipCode)
     }
     
     // Clear any existing timeout
@@ -121,8 +118,8 @@ export function RAGQueryForm({ onQueryComplete }: RAGQueryFormProps) {
           "X-Clerk-Email": user?.primaryEmailAddress?.emailAddress || "",
         },
         body: JSON.stringify({
-          question: question,
-          zip_code: zipCode || undefined,
+          question: submittedQuestion,
+          zip_code: submittedZipCode || undefined,
           top_k: 5,
         }),
       })
@@ -137,7 +134,7 @@ export function RAGQueryForm({ onQueryComplete }: RAGQueryFormProps) {
       const decoder = new TextDecoder()
       let buffer = ""
       let currentResponse: Partial<RAGResponse> = {
-        question: question,
+        question: submittedQuestion,
         answer: "",
         sources: [],
         num_sources: 0,
@@ -147,9 +144,13 @@ export function RAGQueryForm({ onQueryComplete }: RAGQueryFormProps) {
         throw new Error("Failed to get response stream")
       }
 
+      let eventCount = 0
+
       while (true) {
         const { done, value } = await reader.read()
-        if (done) break
+        if (done) {
+          break
+        }
 
         buffer += decoder.decode(value, { stream: true })
         const lines = buffer.split("\n\n")
@@ -158,32 +159,91 @@ export function RAGQueryForm({ onQueryComplete }: RAGQueryFormProps) {
         for (const line of lines) {
           if (line.trim() === "") continue
 
-          const [eventLine, dataLine] = line.split("\n")
-          if (!eventLine || !dataLine) continue
+          eventCount++
 
-          const eventMatch = eventLine.match(/^event: (.+)$/)
-          const dataMatch = dataLine.match(/^data: (.+)$/)
+          // Handle multi-line SSE format
+          const parts = line.split("\n")
+          let eventLine = ""
+          let dataLine = ""
+          
+          for (const part of parts) {
+            if (part.startsWith("event:")) {
+              eventLine = part
+            } else if (part.startsWith("data:")) {
+              dataLine = part
+            }
+          }
 
-          if (!eventMatch || !dataMatch) continue
+          if (!eventLine || !dataLine) {
+            console.warn(`[RAG Query] [Event #${eventCount}] Invalid SSE format - missing event or data line:`, { 
+              eventLine, 
+              dataLine, 
+              allParts: parts,
+              rawLine: line 
+            })
+            continue
+          }
 
-          const eventType = eventMatch[1]
-          const data = JSON.parse(dataMatch[1])
+          const eventMatch = eventLine.match(/^event:\s*(.+)$/)
+          const dataMatch = dataLine.match(/^data:\s*(.+)$/)
+
+          if (!eventMatch || !dataMatch) {
+            console.warn(`[RAG Query] [Event #${eventCount}] Failed to parse SSE event:`, { 
+              eventLine, 
+              dataLine, 
+              eventMatch, 
+              dataMatch,
+              rawLine: line 
+            })
+            continue
+          }
+
+          const eventType = eventMatch[1].trim()
+          let data
+          try {
+            data = JSON.parse(dataMatch[1].trim())
+          } catch (e) {
+            console.error(`[RAG Query] Failed to parse JSON data:`, dataMatch[1], e)
+            continue
+          }
 
           // Handle different event types
           if (eventType === "status") {
             const stage = data.stage
-            if (stage === "analyzing") setLoadingStage("analyzing")
-            else if (stage === "searching") setLoadingStage("searching")
-            else if (stage === "retrieving") setLoadingStage("retrieving")
-            else if (stage === "synthesizing") setLoadingStage("generating")
+            const message = data.message || "Processing your question..."
+            
+            // Map backend stage to frontend stage
+            let newStage: LoadingStage = null
+            if (stage === "analyzing") {
+              newStage = "analyzing"
+            } else if (stage === "searching") {
+              newStage = "searching"
+            } else if (stage === "retrieving") {
+              newStage = "retrieving"
+            } else if (stage === "synthesizing") {
+              newStage = "generating"
+            } else {
+              console.warn(`[RAG Query] Unknown stage: ${stage}`)
+            }
+            
+            // Update React state
+            setLoadingMessage(message)
+            if (newStage === "analyzing") {
+              setLoadingStage("analyzing")
+            } else if (newStage === "searching") {
+              setLoadingStage("searching")
+            } else if (newStage === "retrieving") {
+              setLoadingStage("retrieving")
+            } else if (newStage === "generating") {
+              setLoadingStage("generating")
+            }
           } else if (eventType === "tool") {
-            // Tool call notification - could show which tool is being used
-            console.log(`Tool called: ${data.tool}`)
+            // Tool call notification
           } else if (eventType === "chunk") {
             // Stream answer chunks (if supported)
             currentResponse.answer = (currentResponse.answer || "") + data.text
             const chunkResponse: RAGResponse = {
-              question: currentResponse.question || question,
+              question: currentResponse.question || submittedQuestion,
               answer: currentResponse.answer || "",
               sources: currentResponse.sources || [],
               num_sources: currentResponse.num_sources || 0,
@@ -195,7 +255,7 @@ export function RAGQueryForm({ onQueryComplete }: RAGQueryFormProps) {
           } else if (eventType === "done") {
             // Final response
             const finalResponse: RAGResponse = {
-              question: data.question || question,
+              question: data.question || submittedQuestion,
               answer: data.answer || "",
               sources: data.sources || [],
               num_sources: data.num_sources || 0,
@@ -227,16 +287,12 @@ export function RAGQueryForm({ onQueryComplete }: RAGQueryFormProps) {
     } finally {
       setLoading(false)
       setLoadingStage(null)
+      setLoadingMessage("Processing your question...")
       if (stageTimeoutRef.current) {
         clearTimeout(stageTimeoutRef.current)
         stageTimeoutRef.current = null
       }
     }
-  }
-  
-  const getLoadingMessage = () => {
-    const stage = LOADING_STAGES.find(s => s.stage === loadingStage)
-    return stage?.message || "Processing your question..."
   }
 
   return (
@@ -294,14 +350,16 @@ export function RAGQueryForm({ onQueryComplete }: RAGQueryFormProps) {
           )}
 
           {loading && (
-            <div className="mt-4 p-4 bg-primary/5 border border-primary/20 rounded-lg">
-              <div className="flex items-center gap-3">
-                <Spinner size="sm" />
-                <p className="text-sm text-muted-foreground animate-pulse">
-                  {getLoadingMessage()}
-                </p>
+            <>
+              <div className="mt-4 p-4 bg-primary/5 border border-primary/20 rounded-lg">
+                <div className="flex items-center gap-3">
+                  <Spinner size="sm" />
+                  <p className="text-sm text-muted-foreground animate-pulse">
+                    {loadingMessage}
+                  </p>
+                </div>
               </div>
-            </div>
+            </>
           )}
         </CardContent>
       </Card>

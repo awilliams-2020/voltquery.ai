@@ -954,15 +954,15 @@ class RAGService:
         tools_used = []
         
         try:
+            # Yield immediately to start the HTTP response stream
+            yield ("status", {"stage": "analyzing", "message": "Analyzing your question..."})
+            await asyncio.sleep(0.01)
+            
             # Validate inputs
             is_valid, error_msg = validate_query_inputs(question, zip_code, top_k)
             if not is_valid:
                 yield ("error", {"message": f"Invalid input: {error_msg}"})
                 return
-            
-            # Emit analyzing status
-            yield ("status", {"stage": "analyzing", "message": "Analyzing your question..."})
-            await asyncio.sleep(0.1)
             
             # Refine query for better retrieval
             refined_question = question  # Default to original question
@@ -990,6 +990,7 @@ class RAGService:
             
             if not location_to_use:
                 yield ("status", {"stage": "searching", "message": "Detecting location from question..."})
+                await asyncio.sleep(0.01)
                 location_info = await self.location_service.extract_location_from_question(question)
                 detected_location_info = location_info
                 
@@ -1089,12 +1090,14 @@ class RAGService:
                         else:
                             print(f"[RAGService] stations_check | zip={location_to_use} | source=vector_store | found=false")
                         yield ("status", {"stage": "retrieving", "message": f"Fetching stations for zip {location_to_use}..."})
+                        await asyncio.sleep(0.01)
                         await self.fetch_and_index_stations(location_to_use)
                     else:
                         print(f"[RAGService] stations_check | zip={location_to_use} | source=vector_store | fresh=true")
                 except Exception as e:
                     print(f"[RAGService] stations_check | zip={location_to_use} | source=vector_store | error=check_failed | error={str(e)}")
                     yield ("status", {"stage": "retrieving", "message": f"Fetching stations for zip {location_to_use}..."})
+                    await asyncio.sleep(0.01)
                     await self.fetch_and_index_stations(location_to_use)
             
             # Check if we need to fetch and index BCL (building codes) data
@@ -1198,15 +1201,18 @@ class RAGService:
             # Build location filters
             initial_top_k = top_k * 2 if use_reranking else top_k
             location_filters = []
+            print(f"[RAGService] Building location_filters: detected_location_info={detected_location_info}, location_to_use={location_to_use}")
             if detected_location_info:
                 city = detected_location_info.get("city")
                 state = detected_location_info.get("state")
                 zip_code_val = detected_location_info.get("zip_code") or location_to_use
+                print(f"[RAGService] detected_location_info has: city={city}, state={state}, zip_code={detected_location_info.get('zip_code')}, zip_code_val={zip_code_val}")
                 
                 if zip_code_val:
                     location_filters.append(
                         MetadataFilter(key="queried_zip", value=zip_code_val, operator=FilterOperator.EQ)
                     )
+                    print(f"[RAGService] Added queried_zip filter: {zip_code_val}")
                 elif city and state:
                     location_filters.append(
                         MetadataFilter(key="city", value=city, operator=FilterOperator.EQ)
@@ -1214,10 +1220,26 @@ class RAGService:
                     location_filters.append(
                         MetadataFilter(key="state", value=state, operator=FilterOperator.EQ)
                     )
+                    print(f"[RAGService] Added city/state filters: {city}, {state}")
                 elif state:
                     location_filters.append(
                         MetadataFilter(key="state", value=state, operator=FilterOperator.EQ)
                     )
+                    print(f"[RAGService] Added state filter: {state}")
+            # Also check location_to_use directly if detected_location_info didn't yield a zipcode
+            # This handles cases where zipcode is detected but not in detected_location_info structure
+            if not location_filters and location_to_use:
+                # If location_to_use looks like a zipcode (5 digits), add it
+                if isinstance(location_to_use, str) and location_to_use.isdigit() and len(location_to_use) == 5:
+                    location_filters.append(
+                        MetadataFilter(key="queried_zip", value=location_to_use, operator=FilterOperator.EQ)
+                    )
+                    print(f"[RAGService] Added zipcode {location_to_use} to location_filters from location_to_use (fallback)")
+            
+            print(f"[RAGService] Final location_filters: {len(location_filters)} filter(s)")
+            for i, f in enumerate(location_filters):
+                if hasattr(f, 'key') and hasattr(f, 'value'):
+                    print(f"[RAGService]   Filter {i}: key={f.key}, value={f.value}")
             
             # Create retrievers
             transportation_filter_filters = [
@@ -1295,6 +1317,18 @@ class RAGService:
             )
             
             # Fetch and index utility rates BEFORE creating tools (so we can filter by zip)
+            # Check if we need utility rates and yield status update BEFORE fetching
+            is_electricity_cost_question = self._is_electricity_cost_question(question)
+            question_lower = question.lower()
+            requires_utility_for_rates = any(keyword in question_lower for keyword in [
+                "charging at", "time-of-use", "off-peak", "peak rate", "charging cost", "savings", "compare",
+                "lower bill", "reduce bill", "cut bill", "save on"
+            ]) and not is_electricity_cost_question
+            
+            if is_electricity_cost_question or requires_utility_for_rates:
+                yield ("status", {"stage": "retrieving", "message": "Fetching utility rates..."})
+                await asyncio.sleep(0.01)
+            
             indexed_zip_code, utility_rates_info = await self._fetch_and_index_utility_rates_if_needed(
                 question=question,
                 detected_location_info=detected_location_info,
@@ -1310,29 +1344,26 @@ class RAGService:
                     location_filters.append(zip_filter)
             
             # Create tools with updated location filters
-            yield ("status", {"stage": "searching", "message": "Preparing tools..."})
+            # Pass location_filters if we have any filters OR if we have location_to_use (zipcode)
+            # This ensures tools get location context even if detected_location_info structure is incomplete
+            should_pass_filters = len(location_filters) > 0 or bool(location_to_use and isinstance(location_to_use, str) and location_to_use.isdigit() and len(location_to_use) == 5)
             tools = orchestrator.create_tools(
                 top_k=top_k,
                 use_reranking=use_reranking,
                 rerank_top_n=rerank_top_n,
-                location_filters=location_filters if detected_location_info or indexed_zip_code else None,
+                location_filters=location_filters if should_pass_filters else None,
                 nrel_client=self.nrel_client,
                 location_service=self.location_service,
                 reopt_service=self.reopt_service
             )
             
-            # Check which tools might be used
-            is_electricity_cost_question = self._is_electricity_cost_question(question)
+            # Check which tools might be used (is_electricity_cost_question already checked above)
             is_charging_station_question = self._is_charging_station_question(question)
-            question_lower = question.lower()
-            requires_utility_for_rates = any(keyword in question_lower for keyword in [
-                "charging at", "time-of-use", "off-peak", "peak rate", "charging cost", "savings", "compare",
-                "lower bill", "reduce bill", "cut bill", "save on"
-            ]) and not is_electricity_cost_question
             
             if is_electricity_cost_question or requires_utility_for_rates:
                 yield ("tool", {"tool": "utility_tool", "message": "Fetching utility rates..."})
                 tools_used.append("utility_tool")
+                await asyncio.sleep(0)  # Yield control to allow tool notification to be sent
             
             # Check for other tools
             if any(keyword in question_lower for keyword in ["solar", "solar panel", "solar energy"]):
@@ -1352,7 +1383,6 @@ class RAGService:
                 tools_used.append("optimization_tool")
             
             # Create SubQuestionQueryEngine
-            yield ("status", {"stage": "synthesizing", "message": "Generating response..."})
             router_query_engine = orchestrator.create_sub_question_query_engine(tools, use_robust_parser=True)
             
             # Add location context
@@ -1387,6 +1417,9 @@ class RAGService:
             # Retrieve nodes for sources (for fallback if SubQuestionQueryEngine fails)
             # Note: We don't check if nodes exist here because SubQuestionQueryEngine handles
             # tool routing. Some tools (solar, optimization) don't need indexed data.
+            yield ("status", {"stage": "searching", "message": "Searching knowledge base..."})
+            await asyncio.sleep(0)  # Yield control to allow status update to be sent
+            
             trans_nodes = []
             util_nodes = []
             try:
@@ -1399,8 +1432,13 @@ class RAGService:
             except Exception:
                 pass
             
+            yield ("status", {"stage": "retrieving", "message": "Retrieving relevant information..."})
+            await asyncio.sleep(0)  # Yield control to allow status update to be sent
+            
             # Execute query - SubQuestionQueryEngine will route to appropriate tools
             # Don't block execution if trans/util nodes are empty - other tools may still work
+            yield ("status", {"stage": "synthesizing", "message": "Generating response..."})
+            await asyncio.sleep(0)  # Yield control to allow status update to be sent
             try:
                 response = await asyncio.wait_for(
                     router_query_engine.aquery(contextual_question),
@@ -1462,6 +1500,11 @@ class RAGService:
             if answer_text:
                 answer_text = answer_text.strip()
                 answer_text = re.sub(r'^Response\s*\d*:\s*', '', answer_text, flags=re.IGNORECASE)
+                # Remove LaTeX math notation (escaped brackets)
+                answer_text = re.sub(r'\\\[', '', answer_text)  # Remove \[
+                answer_text = re.sub(r'\\\]', '', answer_text)  # Remove \]
+                answer_text = re.sub(r'\\\(', '', answer_text)  # Remove \( (inline math)
+                answer_text = re.sub(r'\\\)', '', answer_text)  # Remove \) (inline math)
                 answer_text = answer_text.strip()
             
             # Get source nodes

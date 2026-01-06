@@ -14,24 +14,24 @@ export function AppHeader() {
         <div className="flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2">
             <Zap className="h-6 w-6 text-primary" />
-            <span className="text-xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
+            <span className="hidden md:inline text-xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
               Volt Query AI
             </span>
           </Link>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 md:gap-4">
             {isSignedIn && (
               <>
                 <Link href="/history">
-                  <Button variant="ghost" className="gap-2">
+                  <Button variant="ghost" className="gap-1 md:gap-2">
                     <History className="h-4 w-4" />
-                    History
+                    <span className="hidden sm:inline">History</span>
                   </Button>
                 </Link>
                 <Link href="/subscription">
-                  <Button variant="ghost" className="gap-2">
+                  <Button variant="ghost" className="gap-1 md:gap-2">
                     <CreditCard className="h-4 w-4" />
-                    Subscription
+                    <span className="hidden sm:inline">Subscription</span>
                   </Button>
                 </Link>
                 <UserButton 

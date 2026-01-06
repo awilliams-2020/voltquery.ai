@@ -74,6 +74,7 @@ class CircuitBreaker:
         Raises:
             Exception: If circuit is open or function fails
         """
+        # Check circuit state (with lock)
         async with self._lock:
             # Check if circuit is open
             if self.state == CircuitState.OPEN:
@@ -95,12 +96,15 @@ class CircuitBreaker:
                             f"Last failure: {elapsed.total_seconds():.1f}s ago. "
                             f"Retry after {self.timeout.total_seconds():.1f}s"
                         )
+        
+        # Call function WITHOUT holding the lock (allows concurrent requests)
+        # This prevents blocking when multiple requests call the same circuit breaker
+        # The lock is only held for state checks/updates, not during function execution
+        try:
+            result = await func(*args, **kwargs)
             
-            # Try to call function
-            try:
-                result = await func(*args, **kwargs)
-                
-                # Success - update state
+            # Success - update state (with lock)
+            async with self._lock:
                 if self.state == CircuitState.HALF_OPEN:
                     self.success_count += 1
                     if self.success_count >= self.success_threshold:
@@ -115,10 +119,12 @@ class CircuitBreaker:
                         )
                 
                 self.last_success_time = datetime.now()
-                return result
+            
+            return result
                 
-            except Exception as e:
-                # Failure - update state
+        except Exception as e:
+            # Failure - update state (with lock)
+            async with self._lock:
                 self.failure_count += 1
                 self.last_failure_time = datetime.now()
                 
@@ -141,8 +147,8 @@ class CircuitBreaker:
                         failure_count=self.failure_count,
                         action="opened_after_threshold"
                     )
-                
-                raise
+            
+            raise
     
     def get_state(self) -> Dict[str, Any]:
         """Get current circuit breaker state."""

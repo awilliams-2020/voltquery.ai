@@ -43,3 +43,4 @@ class RAGSettings(BaseSettings):
         return timedelta(days=self.bcl_data_ttl_days)
 
 
+

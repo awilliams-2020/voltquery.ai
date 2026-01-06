@@ -10,15 +10,31 @@ This bundle provides:
 
 import re
 import json
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from llama_index.core.tools import QueryEngineTool
 from llama_index.core.query_engine import BaseQueryEngine
 from llama_index.core.callbacks import CallbackManager
 from llama_index.core.schema import NodeWithScore, TextNode, QueryBundle
 from llama_index.core.base.response.schema import Response
+from llama_index.core.vector_stores import MetadataFilter
 from app.services.reopt_service import REoptService
 from app.services.nrel_client import NRELClient
 from src.global_settings import get_global_settings
+
+# State name to abbreviation mapping
+STATE_ABBREVIATIONS = {
+    "alabama": "AL", "alaska": "AK", "arizona": "AZ", "arkansas": "AR", "california": "CA",
+    "colorado": "CO", "connecticut": "CT", "delaware": "DE", "florida": "FL", "georgia": "GA",
+    "hawaii": "HI", "idaho": "ID", "illinois": "IL", "indiana": "IN", "iowa": "IA",
+    "kansas": "KS", "kentucky": "KY", "louisiana": "LA", "maine": "ME", "maryland": "MD",
+    "massachusetts": "MA", "michigan": "MI", "minnesota": "MN", "mississippi": "MS", "missouri": "MO",
+    "montana": "MT", "nebraska": "NE", "nevada": "NV", "new hampshire": "NH", "new jersey": "NJ",
+    "new mexico": "NM", "new york": "NY", "north carolina": "NC", "north dakota": "ND", "ohio": "OH",
+    "oklahoma": "OK", "oregon": "OR", "pennsylvania": "PA", "rhode island": "RI", "south carolina": "SC",
+    "south dakota": "SD", "tennessee": "TN", "texas": "TX", "utah": "UT", "vermont": "VT",
+    "virginia": "VA", "washington": "WA", "west virginia": "WV", "wisconsin": "WI", "wyoming": "WY",
+    "district of columbia": "DC", "washington dc": "DC", "dc": "DC"
+}
 
 
 class OptimizationQueryEngine(BaseQueryEngine):
@@ -34,12 +50,18 @@ class OptimizationQueryEngine(BaseQueryEngine):
         llm,
         reopt_service: REoptService,
         nrel_client: Optional[NRELClient] = None,
-        callback_manager: Optional[CallbackManager] = None
+        callback_manager: Optional[CallbackManager] = None,
+        default_location: Optional[str] = None,
+        default_city: Optional[str] = None,
+        default_state: Optional[str] = None
     ):
         self.llm = llm
         self.reopt_service = reopt_service
         self.nrel_client = nrel_client or NRELClient()
         self.settings = get_global_settings()
+        self.default_location = default_location
+        self.default_city = default_city
+        self.default_state = default_state
         super().__init__(callback_manager=callback_manager)
     
     def _get_prompt_modules(self):
@@ -55,8 +77,6 @@ class OptimizationQueryEngine(BaseQueryEngine):
         query_str = query_bundle.query_str
         query_lower = query_str.lower()
         
-        print(f"DEBUG: _aquery called with query: {query_str[:200]}...", flush=True)
-        
         # Extract location, load_profile_type, urdb_label, additional_load_kw, property_type, and ownership_type
         location = None
         load_profile_type = "residential"  # Default
@@ -64,8 +84,6 @@ class OptimizationQueryEngine(BaseQueryEngine):
         additional_load_kw = 0.0
         property_type = None
         ownership_type = None
-        
-        print(f"DEBUG: Initial load_profile_type={load_profile_type}", flush=True)
         
         # Detect if this is a purchase or lease query from parallel scenario approach
         # The orchestrator will call this tool twice with explicit purchase/lease keywords
@@ -81,11 +99,25 @@ class OptimizationQueryEngine(BaseQueryEngine):
         if zip_match:
             location = zip_match.group(0)
         
-        # Try to extract city, state pattern (e.g., "Denver, CO")
+        # Try to extract city, state pattern (e.g., "Denver, CO" or "Atlanta, Georgia")
         if not location:
+            # First try 2-letter state abbreviation (e.g., "Denver, CO")
             city_state_match = re.search(r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*),\s*([A-Z]{2})\b', query_str)
             if city_state_match:
                 location = f"{city_state_match.group(1)}, {city_state_match.group(2)}"
+            else:
+                # Try full state name (e.g., "Atlanta, Georgia")
+                city_state_full_match = re.search(r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*),\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b', query_str)
+                if city_state_full_match:
+                    city = city_state_full_match.group(1)
+                    state_name = city_state_full_match.group(2).lower()
+                    # Convert state name to abbreviation
+                    state_abbr = STATE_ABBREVIATIONS.get(state_name)
+                    if state_abbr:
+                        location = f"{city}, {state_abbr}"
+                    else:
+                        # If we can't find abbreviation, use the full name (geocoding should handle it)
+                        location = f"{city}, {city_state_full_match.group(2)}"
         
         # Try to extract coordinates (lat,lon)
         if not location:
@@ -96,11 +128,13 @@ class OptimizationQueryEngine(BaseQueryEngine):
                 if -90 <= lat_val <= 90 and -180 <= lon_val <= 180:
                     location = f"{lat_val},{lon_val}"
         
+        # Try to use default city/state from location_filters if available
+        if not location and self.default_city and self.default_state:
+            location = f"{self.default_city}, {self.default_state}"
+        
         # Policy-Aware Financial Strategy: Extract lease/business keywords
         # Note: query_lower already set above, but ensure it's fresh
         query_lower = query_str.lower()
-        
-        print(f"DEBUG: Query analysis - query_lower contains 'homeowner': {'homeowner' in query_lower}, contains 'commercial': {'commercial' in query_lower}", flush=True)
         
         # Check for residential keywords first (homeowner, residential, home, house)
         # These take priority over commercial keywords to avoid false positives
@@ -108,8 +142,6 @@ class OptimizationQueryEngine(BaseQueryEngine):
             "homeowner", "home owner", "residential", "home", "house", "household",
             "my home", "my house", "residential property"
         ])
-        
-        print(f"DEBUG: is_residential_keyword={is_residential_keyword}", flush=True)
         
         # Check for business/commercial keywords (but exclude if residential keywords present)
         # IMPORTANT: Exclude tax credit references - "commercial credit", "48e", etc. refer to tax credits, NOT property type
@@ -127,8 +159,6 @@ class OptimizationQueryEngine(BaseQueryEngine):
         ])
         
         is_business = not is_residential_keyword and has_business_keywords and not has_tax_credit_refs
-        
-        print(f"DEBUG: has_business_keywords={has_business_keywords}, has_tax_credit_refs={has_tax_credit_refs}, is_business={is_business}", flush=True)
         
         # Check for lease keywords (including PPA and third-party)
         # For parallel scenarios, prioritize explicit keywords from orchestrator
@@ -152,7 +182,6 @@ class OptimizationQueryEngine(BaseQueryEngine):
             else:
                 # Default residential to purchase (will get 0% ITC)
                 ownership_type = "purchase"
-            print(f"DEBUG: Detected RESIDENTIAL property (is_residential_keyword={is_residential_keyword}, is_business={is_business})", flush=True)
         elif is_business:
             load_profile_type = "commercial"
             property_type = "commercial"
@@ -161,20 +190,17 @@ class OptimizationQueryEngine(BaseQueryEngine):
                 ownership_type = "purchase"  # Business purchase still gets 30% ITC
             else:
                 ownership_type = "lease"
-            print(f"DEBUG: Detected COMMERCIAL property (is_residential_keyword={is_residential_keyword}, is_business={is_business})", flush=True)
         elif "industrial" in query_lower:
             load_profile_type = "industrial"
             property_type = "industrial"
             ownership_type = "purchase" if not is_lease else "lease"
-            print(f"DEBUG: Detected INDUSTRIAL property", flush=True)
         else:
             # Default to residential if unclear
             load_profile_type = "residential"
             property_type = "residential"
             ownership_type = "purchase"
-            print(f"DEBUG: Defaulted to RESIDENTIAL property (unclear)", flush=True)
         
-        print(f"DEBUG: Final property_type={property_type}, ownership_type={ownership_type}, load_profile_type={load_profile_type}", flush=True)
+        print(f"[OptimizationTool] property_type={property_type} | ownership_type={ownership_type} | load_profile={load_profile_type}")
         
         # Try to extract URDB label (usually a UUID or identifier)
         urdb_match = re.search(r'urdb[_\s]*label[:\s]+([a-zA-Z0-9_-]+)', query_str, re.IGNORECASE)
@@ -199,7 +225,11 @@ class OptimizationQueryEngine(BaseQueryEngine):
                     additional_load_kw = float(match.group(1))
                 break
         
-        # If no location found, raise an error
+        # If no location found, try using default_location if provided
+        if not location and self.default_location:
+            location = self.default_location
+        
+        # If still no location found, raise an error
         if not location:
             response_text = (
                 f"Could not extract location from query: '{query_str}'. "
@@ -233,11 +263,10 @@ class OptimizationQueryEngine(BaseQueryEngine):
                 ])
             )
             
-            print(f"DEBUG: Before REopt call - property_type={property_type}, load_profile_type={load_profile_type}, ownership_type={ownership_type}, is_lease_only_query={is_lease_only_query}", flush=True)
-            
             # Scenario Branching: Run dual scenarios for residential comparison queries, single for lease-only or commercial
             if property_type == "residential" and not is_lease_only_query:
                 # Run scenario branching (Purchase vs Lease) for comparison queries
+                print(f"[OptimizationTool] scenario_branching | type=residential | comparison=true")
                 result = await self.reopt_service.run_reopt_scenario_branching(
                     lat=lat,
                     lon=lon,
@@ -249,10 +278,9 @@ class OptimizationQueryEngine(BaseQueryEngine):
                 )
             else:
                 # Lease-only or commercial: Run single scenario
-                print(f"DEBUG: Running single scenario - is_lease_only_query={is_lease_only_query}, property_type={property_type}", flush=True)
                 if is_lease_only_query:
                     # Single lease scenario for residential lease-only queries
-                    print(f"DEBUG: Calling run_reopt_optimization with lease - property_type={property_type}, load_profile_type={load_profile_type}, ownership_type=lease", flush=True)
+                    print(f"[OptimizationTool] scenario=single | type=residential | ownership=lease")
                     result = await self.reopt_service.run_reopt_optimization(
                         lat=lat,
                         lon=lon,
@@ -265,7 +293,7 @@ class OptimizationQueryEngine(BaseQueryEngine):
                     )
                 else:
                     # Commercial: Run single scenario with policy flag
-                    print(f"DEBUG: Calling run_reopt_scenario_branching for commercial - property_type={property_type}, load_profile_type={load_profile_type}", flush=True)
+                    print(f"[OptimizationTool] scenario_branching | type={property_type}")
                     result = await self.reopt_service.run_reopt_scenario_branching(
                         lat=lat,
                         lon=lon,
@@ -530,7 +558,8 @@ def get_tool(
     llm,
     reopt_service: REoptService,
     nrel_client: Optional[NRELClient] = None,
-    callback_manager: Optional[CallbackManager] = None
+    callback_manager: Optional[CallbackManager] = None,
+    location_filters: Optional[List[MetadataFilter]] = None
 ) -> QueryEngineTool:
     """
     Get the optimization tool as a QueryEngineTool.
@@ -541,17 +570,46 @@ def get_tool(
     Args:
         llm: LLM instance for query processing
         reopt_service: REopt service instance
+        nrel_client: Optional NREL client (creates new if not provided)
         callback_manager: Optional callback manager for observability
+        location_filters: Optional location-based metadata filters (used to extract zipcode)
         
     Returns:
         QueryEngineTool configured for optimization queries
     """
+    # Extract location information from location_filters if provided
+    default_location = None
+    default_city = None
+    default_state = None
+    if location_filters:
+        for filter_obj in location_filters:
+            if hasattr(filter_obj, 'key') and hasattr(filter_obj, 'value'):
+                filter_key = filter_obj.key
+                filter_value = filter_obj.value
+                if filter_key in ['zip', 'queried_zip']:
+                    default_location = str(filter_value)
+                elif filter_key == 'city':
+                    default_city = str(filter_value)
+                elif filter_key == 'state':
+                    # Convert state name to abbreviation if needed
+                    state_val = str(filter_value)
+                    state_lower = state_val.lower()
+                    if state_lower in STATE_ABBREVIATIONS:
+                        default_state = STATE_ABBREVIATIONS[state_lower]
+                    elif len(state_val) == 2:
+                        default_state = state_val.upper()
+                    else:
+                        default_state = state_val
+    
     # Create query engine
     query_engine = OptimizationQueryEngine(
         llm=llm,
         reopt_service=reopt_service,
         nrel_client=nrel_client,
-        callback_manager=callback_manager
+        callback_manager=callback_manager,
+        default_location=default_location,
+        default_city=default_city,
+        default_state=default_state
     )
     
     # Create tool with high-quality metadata

@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional, Dict, Any, AsyncGenerator
@@ -125,6 +125,11 @@ async def rag_query_stream(
     async def generate_stream() -> AsyncGenerator[str, None]:
         final_result = None
         try:
+            # Yield immediately to start HTTP response stream BEFORE any heavy work
+            # This ensures FastAPI sends response headers immediately
+            yield format_sse_event("status", {"stage": "analyzing", "message": "Starting query..."})
+            await asyncio.sleep(0.01)  # Yield control to allow headers to be sent
+            
             # Check query limit
             subscription = UserService.get_user_subscription(db, current_user.id)
             if not subscription:
@@ -138,11 +143,7 @@ async def rag_query_stream(
                 })
                 return
             
-            # Emit initial status
-            yield format_sse_event("status", {"stage": "analyzing", "message": "Analyzing your question..."})
-            await asyncio.sleep(0.1)  # Small delay for UI responsiveness
-            
-            # Process query with streaming
+            # Process query with streaming (status updates come from rag_service)
             llm_mode = llm_service.settings.llm_mode
             rag_service = RAGService(llm_mode=llm_mode)
             
@@ -155,7 +156,11 @@ async def rag_query_stream(
                 # Capture final result for history saving
                 if event_type == "done":
                     final_result = event_data
-                yield format_sse_event(event_type, event_data)
+                # Format and yield SSE event immediately
+                sse_event = format_sse_event(event_type, event_data)
+                yield sse_event
+                # Yield control to event loop to ensure FastAPI flushes immediately
+                await asyncio.sleep(0.01)
             
             # Increment query count and save to history if we got a result
             if final_result:
@@ -194,13 +199,26 @@ async def rag_query_stream(
         except Exception as e:
             yield format_sse_event("error", {"message": str(e)})
     
+    # NOTE: Traefik does NOT buffer by default - it streams responses.
+    # If buffering is happening, check:
+    # 1. Is Traefik Buffering middleware explicitly enabled? (Check Traefik config)
+    # 2. Test direct backend access (bypass Traefik) to isolate the issue
+    # 3. Check FastAPI/uvicorn logs to see when generator starts vs when headers are sent
+    #
+    # If Traefik Buffering middleware IS enabled, disable it with:
+    #   labels:
+    #     - "traefik.http.services.backend.buffering.maxRequestBodyBytes=0"
+    #     - "traefik.http.services.backend.buffering.maxResponseBodyBytes=0"
     return StreamingResponse(
         generate_stream(),
         media_type="text/event-stream",
         headers={
-            "Cache-Control": "no-cache",
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
             "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",  # Disable buffering in nginx
+            "X-Accel-Buffering": "no",  # Disable buffering in nginx (Traefik ignores this)
+            "X-Content-Type-Options": "nosniff",
         }
     )
 

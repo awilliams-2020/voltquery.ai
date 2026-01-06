@@ -75,11 +75,18 @@ export default function HistoryPage() {
               {queries.map((query) => (
                 <Card key={query.id}>
                   <CardHeader>
-                    <div className="flex items-start justify-between">
+                    <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
                       <CardTitle className="text-lg">{query.question}</CardTitle>
-                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground flex-shrink-0">
                         <Calendar className="h-4 w-4" />
-                        {format(new Date(query.created_at), "MMM d, yyyy 'at' h:mm a")}
+                        <span className="whitespace-nowrap">
+                          <span className="hidden sm:inline">
+                            {format(new Date(query.created_at), "MMM d, yyyy 'at' h:mm a")}
+                          </span>
+                          <span className="sm:hidden">
+                            {format(new Date(query.created_at), "MMM d, yyyy")}
+                          </span>
+                        </span>
                       </div>
                     </div>
                     {query.zip_code && (

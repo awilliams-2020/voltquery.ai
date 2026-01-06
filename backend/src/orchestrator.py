@@ -419,7 +419,8 @@ YOUR TASK:
             llm=self.llm,
             callback_manager=self.callback_manager,
             nrel_client=nrel_client,
-            location_service=location_service
+            location_service=location_service,
+            location_filters=location_filters
         )
         tools.append(solar_tool)
         
@@ -466,7 +467,8 @@ YOUR TASK:
                 llm=self.llm,
                 reopt_service=reopt_service,
                 nrel_client=nrel_client,
-                callback_manager=self.callback_manager
+                callback_manager=self.callback_manager,
+                location_filters=location_filters
             )
             tools.append(optimization_tool)
         

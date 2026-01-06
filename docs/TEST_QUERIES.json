@@ -49,6 +49,18 @@
           "expected_tool": "optimization_tool",
           "location": "45424",
           "notes": "NPV and optimal sizing query"
+        },
+        {
+          "query": "What is the optimal solar system size for Atlanta, Georgia with a lease?",
+          "expected_tool": "optimization_tool",
+          "location": "Atlanta, GA",
+          "notes": "Lease scenario - should return positive size (30% ITC)"
+        },
+        {
+          "query": "Optimal solar sizing for a commercial property in Atlanta, Georgia?",
+          "expected_tool": "optimization_tool",
+          "location": "Atlanta, GA",
+          "notes": "Commercial scenario - should return positive size (30% ITC)"
         }
       ]
     },

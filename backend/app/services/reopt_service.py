@@ -262,10 +262,9 @@ class REoptService:
             }
         }
         
-        # Debug: Log financial parameters for lease scenarios
+        # Log financial parameters for lease scenarios
         if ownership_type == "lease":
-            print(f"DEBUG: Lease scenario payload - federal_itc_fraction={fed_itc_fraction}, third_party_ownership={payload['Financial']['third_party_ownership']}, property_type={property_type}", flush=True)
-            print(f"DEBUG: Financial section: {json.dumps(payload['Financial'], indent=2)}", flush=True)
+            print(f"[REoptService] lease_scenario | itc={fed_itc_fraction} | third_party={payload['Financial']['third_party_ownership']} | property={property_type}")
         
         return payload
     
@@ -325,9 +324,8 @@ class REoptService:
                 rate_limit = response.headers.get("X-RateLimit-Limit")
                 rate_remaining = response.headers.get("X-RateLimit-Remaining")
                 if rate_limit and rate_remaining:
-                    print(f"DEBUG: Rate limit: {rate_remaining}/{rate_limit} requests remaining")
                     if int(rate_remaining) < 10:
-                        print(f"WARNING: Low rate limit remaining: {rate_remaining}/{rate_limit}")
+                        print(f"[REoptService] WARNING rate_limit_low | remaining={rate_remaining}/{rate_limit}")
                 
                 # Handle rate limit errors (429)
                 if response.status_code == 429:
@@ -600,10 +598,7 @@ class REoptService:
                         )
                 except httpx.HTTPStatusError as e:
                     poll_elapsed = time_module.time() - poll_start_time if 'poll_start_time' in locals() else 0
-                    print(f"WARNING: HTTP error {e.response.status_code} on poll attempt {attempt + 1} (after {poll_elapsed:.2f}s)", flush=True)
-                    print(f"DEBUG: Response text: {e.response.text[:500]}", flush=True)
-                    print(f"DEBUG: Response headers: {dict(e.response.headers)}", flush=True)
-                    sys.stdout.flush()
+                    print(f"[REoptService] ERROR http_status | code={e.response.status_code} | attempt={attempt + 1} | elapsed={poll_elapsed:.2f}s")
                     if e.response.status_code == 404:
                         # Job not found yet, use exponential backoff
                         wait_time = min(self.INITIAL_POLL_INTERVAL * (2 ** min(attempt // 3, 4)), self.MAX_POLL_INTERVAL)
@@ -623,11 +618,7 @@ class REoptService:
                 except Exception as e:
                     poll_elapsed = time_module.time() - poll_start_time if 'poll_start_time' in locals() else 0
                     error_type = type(e).__name__
-                    print(f"WARNING: Exception on poll attempt {attempt + 1} (after {poll_elapsed:.2f}s): {error_type}: {str(e)}", flush=True)
-                    import traceback
-                    print(f"DEBUG: Traceback:", flush=True)
-                    traceback.print_exc()
-                    sys.stdout.flush()
+                    print(f"[REoptService] ERROR poll_exception | type={error_type} | attempt={attempt + 1} | elapsed={poll_elapsed:.2f}s | error={str(e)[:100]}")
                     if attempt < self.MAX_POLL_ATTEMPTS - 1:
                         # Use exponential backoff for general errors
                         wait_time = min(self.INITIAL_POLL_INTERVAL * (2 ** min(attempt // 3, 4)), self.MAX_POLL_INTERVAL)
@@ -664,10 +655,6 @@ class REoptService:
         site = scenario.get("Site", {})
         financial_outputs = outputs.get("Financial", {})
         
-        # Debug: Log full Financial outputs for lease scenarios
-        if property_type == "residential":
-            print(f"DEBUG: REopt Financial outputs keys: {list(financial_outputs.keys())}", flush=True)
-            print(f"DEBUG: REopt Financial outputs (first 2000 chars): {json.dumps(financial_outputs, indent=2)[:2000]}", flush=True)
         
         # Extract NPV - REopt v3 API structure: outputs.Financial.npv
         # For third-party ownership, REopt may return NPV=0.0 when no system is optimal
@@ -687,15 +674,11 @@ class REoptService:
         if npv_value is not None:
             try:
                 npv = float(npv_value)
-                if property_type == "residential":
-                    print(f"DEBUG: Extracted NPV={npv} from REopt response (npv_value={npv_value})", flush=True)
             except (ValueError, TypeError) as e:
-                if property_type == "residential":
-                    print(f"DEBUG: Failed to convert NPV value '{npv_value}' to float: {e}", flush=True)
+                print(f"[REoptService] ERROR npv_conversion | value={npv_value} | error={str(e)}")
                 pass
         else:
-            if property_type == "residential":
-                print(f"DEBUG: NPV not found in REopt response (checked npv, offtaker_npv, owner_npv)", flush=True)
+            print(f"[REoptService] WARNING npv_not_found | checked_fields=npv,offtaker_npv,owner_npv")
         
         # Extract optimal system sizes
         optimal_system_sizes = {}
@@ -910,8 +893,6 @@ class REoptService:
         import sys
         import time as time_module
         
-        print(f"DEBUG: run_reopt_optimization called: lat={lat}, lon={lon}, load_profile={load_profile_type}", flush=True)
-        sys.stdout.flush()
         start_time = time_module.time()
         # If no URDB label provided, try to look one up from URDB API
         # REopt API requires a valid urdb_label in ElectricTariff
@@ -949,9 +930,9 @@ class REoptService:
                                     first_rate = items[0]
                                     urdb_label = first_rate.get("label") or first_rate.get("urdb_label") or first_rate.get("id")
                                     if urdb_label:
-                                        print(f"INFO: Found URDB label '{urdb_label}' using zip code {zip_code}")
+                                        print(f"[REoptService] urdb_found | zip={zip_code} | label={urdb_label}")
                         except Exception as e:
-                            print(f"DEBUG: Error fetching URDB by zip code: {str(e)}")
+                            print(f"[REoptService] ERROR urdb_fetch | method=zip | error={str(e)[:100]}")
                     
                     # Approach 2: Try sectors with lat/lon if zip code didn't work
                     if not urdb_label:
@@ -988,12 +969,10 @@ class REoptService:
                                         first_rate = items[0]
                                         urdb_label = first_rate.get("label") or first_rate.get("urdb_label") or first_rate.get("id")
                                         if urdb_label:
-                                            print(f"INFO: Found URDB label '{urdb_label}' for sector '{sector}'")
+                                            print(f"[REoptService] urdb_found | sector={sector} | label={urdb_label}")
                                             break
-                                    else:
-                                        print(f"DEBUG: No URDB rates found for lat={lat}, lon={lon}, sector={sector}")
                             except Exception as sector_error:
-                                print(f"DEBUG: Error fetching URDB for sector {sector}: {str(sector_error)}")
+                                print(f"[REoptService] ERROR urdb_fetch | sector={sector} | error={str(sector_error)[:100]}")
                                 continue
                     
                     # Approach 3: Try without sector filter (get all sectors)
@@ -1021,9 +1000,9 @@ class REoptService:
                                     first_rate = items[0]
                                     urdb_label = first_rate.get("label") or first_rate.get("urdb_label") or first_rate.get("id")
                                     if urdb_label:
-                                        print(f"INFO: Found URDB label '{urdb_label}' without sector filter")
+                                        print(f"[REoptService] urdb_found | method=no_sector | label={urdb_label}")
                         except Exception as e:
-                            print(f"DEBUG: Error fetching URDB without sector: {str(e)}")
+                            print(f"[REoptService] ERROR urdb_fetch | method=no_sector | error={str(e)[:100]}")
                     
                     if not urdb_label:
                         print(f"WARNING: Could not find URDB label for location (lat={lat}, lon={lon}, zip={zip_code})")
@@ -1047,45 +1026,29 @@ class REoptService:
         
         # Submit job with circuit breaker
         async def _submit():
-            import sys
-            print(f"DEBUG: _submit wrapper called", flush=True)
-            sys.stdout.flush()
             return await self._submit_job(payload)
         
-        print(f"DEBUG: About to submit REopt job via circuit breaker", flush=True)
-        import sys
-        sys.stdout.flush()
         run_uuid = await self.reopt_breaker.call(_submit)
-        print(f"DEBUG: Job submitted, run_uuid={run_uuid}", flush=True)
-        sys.stdout.flush()
+        print(f"[REoptService] job_submitted | run_uuid={run_uuid}")
         
         # Poll results with circuit breaker
         async def _poll():
-            import sys
             import time as time_module
             poll_wrapper_start = time_module.time()
-            print(f"DEBUG: _poll wrapper called for run_uuid={run_uuid}", flush=True)
-            sys.stdout.flush()
             try:
                 result = await self._poll_results(run_uuid)
                 poll_wrapper_elapsed = time_module.time() - poll_wrapper_start
-                print(f"DEBUG: _poll_results completed successfully (took {poll_wrapper_elapsed:.2f}s)", flush=True)
-                sys.stdout.flush()
+                print(f"[REoptService] poll_complete | elapsed={poll_wrapper_elapsed:.2f}s")
                 return result
             except Exception as e:
                 poll_wrapper_elapsed = time_module.time() - poll_wrapper_start
-                print(f"ERROR: _poll_results raised exception after {poll_wrapper_elapsed:.2f}s: {type(e).__name__}: {str(e)}", flush=True)
-                import traceback
-                traceback.print_exc()
-                sys.stdout.flush()
+                print(f"[REoptService] ERROR poll_failed | elapsed={poll_wrapper_elapsed:.2f}s | type={type(e).__name__} | error={str(e)[:100]}")
                 raise
         
-        print(f"DEBUG: About to call circuit breaker for polling (elapsed: {time_module.time() - start_time:.2f}s)", flush=True)
-        sys.stdout.flush()
         try:
             results = await self.reopt_breaker.call(_poll)
-            print(f"DEBUG: Circuit breaker call completed successfully (total elapsed: {time_module.time() - start_time:.2f}s)", flush=True)
-            sys.stdout.flush()
+            total_elapsed = time_module.time() - start_time
+            print(f"[REoptService] optimization_complete | elapsed={total_elapsed:.2f}s")
         except Exception as e:
             total_elapsed = time_module.time() - start_time
             print(f"ERROR: Circuit breaker call failed after {total_elapsed:.2f}s: {type(e).__name__}: {str(e)}", flush=True)
