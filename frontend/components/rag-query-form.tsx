@@ -33,14 +33,20 @@ type LoadingStage =
   | "analyzing" 
   | "searching" 
   | "retrieving" 
-  | "generating" 
+  | "preparing"
+  | "generating"
+  | "processing"
+  | "finalizing"
   | null
 
 const LOADING_STAGES: Array<{ stage: LoadingStage; message: string; delay: number }> = [
   { stage: "analyzing", message: "Analyzing your question...", delay: 500 },
   { stage: "searching", message: "Searching for relevant information...", delay: 1500 },
   { stage: "retrieving", message: "Retrieving data from knowledge base...", delay: 2500 },
-  { stage: "generating", message: "Generating response...", delay: 3500 },
+  { stage: "preparing", message: "Preparing query for AI...", delay: 3500 },
+  { stage: "generating", message: "Generating response...", delay: 4000 },
+  { stage: "processing", message: "Processing answer...", delay: 4500 },
+  { stage: "finalizing", message: "Finalizing response...", delay: 5000 },
 ]
 
 const STORAGE_KEY_RESPONSE = "rag-last-response"
@@ -220,7 +226,16 @@ export function RAGQueryForm({ onQueryComplete }: RAGQueryFormProps) {
               newStage = "searching"
             } else if (stage === "retrieving") {
               newStage = "retrieving"
+            } else if (stage === "preparing") {
+              newStage = "preparing"
+            } else if (stage === "generating") {
+              newStage = "generating"
+            } else if (stage === "processing") {
+              newStage = "processing"
+            } else if (stage === "finalizing") {
+              newStage = "finalizing"
             } else if (stage === "synthesizing") {
+              // Legacy stage name - map to generating for backwards compatibility
               newStage = "generating"
             } else {
               console.warn(`[RAG Query] Unknown stage: ${stage}`)
@@ -228,15 +243,7 @@ export function RAGQueryForm({ onQueryComplete }: RAGQueryFormProps) {
             
             // Update React state
             setLoadingMessage(message)
-            if (newStage === "analyzing") {
-              setLoadingStage("analyzing")
-            } else if (newStage === "searching") {
-              setLoadingStage("searching")
-            } else if (newStage === "retrieving") {
-              setLoadingStage("retrieving")
-            } else if (newStage === "generating") {
-              setLoadingStage("generating")
-            }
+            setLoadingStage(newStage)
           } else if (eventType === "tool") {
             // Tool call notification
           } else if (eventType === "chunk") {

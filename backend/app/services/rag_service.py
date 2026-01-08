@@ -944,7 +944,7 @@ class RAGService:
         Yields tuples of (event_type, event_data) for SSE streaming.
         
         Event types:
-        - status: Progress updates (analyzing, searching, retrieving, synthesizing)
+        - status: Progress updates (analyzing, searching, retrieving, preparing, generating, processing, finalizing)
         - tool: Tool call notifications (transportation_tool, utility_tool, solar_production_tool, optimization_tool)
         - chunk: Answer text chunks (if streaming is supported)
         - done: Final response with sources
@@ -1353,6 +1353,7 @@ class RAGService:
                 rerank_top_n=rerank_top_n,
                 location_filters=location_filters if should_pass_filters else None,
                 nrel_client=self.nrel_client,
+                bcl_client=self.bcl_client,
                 location_service=self.location_service,
                 reopt_service=self.reopt_service
             )
@@ -1373,6 +1374,15 @@ class RAGService:
             if is_charging_station_question:
                 yield ("tool", {"tool": "transportation_tool", "message": "Searching for charging stations..."})
                 tools_used.append("transportation_tool")
+            
+            # Check for building-related questions
+            is_building_question = self._is_building_efficiency_question(question)
+            if is_building_question or any(keyword in question_lower for keyword in [
+                "building energy", "building profile", "building code", "energy code",
+                "building efficiency", "building performance", "building standard"
+            ]):
+                yield ("tool", {"tool": "buildings_tool", "message": "Searching building codes and efficiency standards..."})
+                tools_used.append("buildings_tool")
             
             if any(keyword in question_lower for keyword in [
                 "investment", "sizing", "roi", "optimal size", "optimal system", "npv",
@@ -1407,6 +1417,10 @@ class RAGService:
             if "cost" in question.lower() or "compare" in question.lower() or "difference" in question.lower():
                 completion_instruction = "\n\nIMPORTANT: Please provide a complete answer with all calculations and comparisons. Do not stop mid-sentence. Include all requested information such as cost comparisons and monthly cost differences."
             
+            # Add instruction to include all tool results
+            if is_building_question or any(keyword in question.lower() for keyword in ["building energy", "building profile", "building code"]):
+                completion_instruction += "\n\nIMPORTANT: If building energy codes, efficiency standards, or building performance data was retrieved, you MUST include this information in your response. Do not omit building-related information."
+            
             # Use refined question for better retrieval
             contextual_question = (
                 f"{refined_question}"
@@ -1437,7 +1451,10 @@ class RAGService:
             
             # Execute query - SubQuestionQueryEngine will route to appropriate tools
             # Don't block execution if trans/util nodes are empty - other tools may still work
-            yield ("status", {"stage": "synthesizing", "message": "Generating response..."})
+            yield ("status", {"stage": "preparing", "message": "Preparing query for AI..."})
+            await asyncio.sleep(0)  # Yield control to allow status update to be sent
+            
+            yield ("status", {"stage": "generating", "message": "Generating response..."})
             await asyncio.sleep(0)  # Yield control to allow status update to be sent
             try:
                 response = await asyncio.wait_for(
@@ -1450,6 +1467,9 @@ class RAGService:
             except Exception as e:
                 yield ("error", {"message": f"Query failed: {str(e)}"})
                 return
+            
+            yield ("status", {"stage": "processing", "message": "Processing answer..."})
+            await asyncio.sleep(0)  # Yield control to allow status update to be sent
             
             # Extract answer text
             answer_text = ""
@@ -1507,7 +1527,7 @@ class RAGService:
                 answer_text = re.sub(r'\\\)', '', answer_text)  # Remove \) (inline math)
                 answer_text = answer_text.strip()
             
-            # Get source nodes
+            # Get source nodes and extract tools actually used
             final_nodes = []
             try:
                 if hasattr(response, "source_nodes") and response.source_nodes:
@@ -1538,6 +1558,20 @@ class RAGService:
                             if isinstance(metadata, dict):
                                 if any(key in str(metadata).lower() for key in ["sub_question", "subquestion"]):
                                     continue
+                                
+                                # Extract tool name from metadata if available
+                                tool_name = metadata.get("tool_name") or metadata.get("tool")
+                                if tool_name and tool_name not in tools_used:
+                                    tools_used.append(tool_name)
+                                
+                                # Detect tool usage from domain metadata
+                                domain = metadata.get("domain")
+                                if domain == "buildings" and "buildings_tool" not in tools_used:
+                                    tools_used.append("buildings_tool")
+                                elif domain == "utility" and "utility_tool" not in tools_used:
+                                    tools_used.append("utility_tool")
+                                elif domain == "transportation" and "transportation_tool" not in tools_used:
+                                    tools_used.append("transportation_tool")
                         
                         actual_source_nodes.append(node)
                     
@@ -1545,6 +1579,13 @@ class RAGService:
                         final_nodes = actual_source_nodes[:top_k]
             except:
                 pass
+            
+            # Also check response text for tool mentions (fallback detection)
+            if answer_text:
+                answer_lower = answer_text.lower()
+                if any(keyword in answer_lower for keyword in ["building code", "energy code", "building efficiency", "building standard", "iecc", "ashrae"]):
+                    if "buildings_tool" not in tools_used:
+                        tools_used.append("buildings_tool")
             
             if not final_nodes:
                 if is_charging_station_question and trans_nodes:
@@ -1555,6 +1596,9 @@ class RAGService:
                     final_nodes = trans_nodes[:top_k]
                 elif util_nodes:
                     final_nodes = util_nodes[:top_k]
+            
+            yield ("status", {"stage": "finalizing", "message": "Finalizing response..."})
+            await asyncio.sleep(0)  # Yield control to allow status update to be sent
             
             # Build final response
             response_data = {

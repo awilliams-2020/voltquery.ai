@@ -116,7 +116,7 @@ async def rag_query_stream(
     Uses SSE format: event: <type>\ndata: <json>\n\n
     
     Event types:
-    - status: Progress updates (analyzing, searching, retrieving, synthesizing)
+    - status: Progress updates (analyzing, searching, retrieving, preparing, generating, processing, finalizing)
     - tool: Tool call notifications (transportation_tool, utility_tool, etc.)
     - chunk: Answer text chunks as they're generated
     - done: Final response with sources

@@ -61,6 +61,30 @@
           "expected_tool": "optimization_tool",
           "location": "Atlanta, GA",
           "notes": "Commercial scenario - should return positive size (30% ITC)"
+        },
+        {
+          "query": "What is the energy consumption for a 2000 sq ft home in zip 80202?",
+          "expected_tool": "building_tool",
+          "location": "80202",
+          "notes": "Building energy consumption query"
+        },
+        {
+          "query": "What's the typical electricity usage for a commercial building in Denver?",
+          "expected_tool": "building_tool",
+          "location": "Denver, CO",
+          "notes": "Commercial building energy usage query"
+        },
+        {
+          "query": "Building load profile for a 1500 sq ft residential property in 45424",
+          "expected_tool": "building_tool",
+          "location": "45424",
+          "notes": "Building load profile query"
+        },
+        {
+          "query": "What is the annual energy consumption for a warehouse in Atlanta, GA?",
+          "expected_tool": "building_tool",
+          "location": "Atlanta, GA",
+          "notes": "Warehouse building energy query"
         }
       ]
     },
@@ -90,6 +114,30 @@
           "expected_tool": "optimization_tool",
           "location": "Denver, CO",
           "notes": "Comprehensive financial analysis"
+        },
+        {
+          "query": "What's the energy consumption for my building and electricity rates in zip 80202?",
+          "expected_tools": ["building_tool", "utility_tool"],
+          "location": "80202",
+          "notes": "Building consumption with utility rates"
+        },
+        {
+          "query": "Building load profile and optimal solar size for a 2000 sq ft home in Denver",
+          "expected_tools": ["building_tool", "optimization_tool"],
+          "location": "Denver, CO",
+          "notes": "Building load with solar optimization"
+        },
+        {
+          "query": "What's the energy usage for a commercial building and can solar offset it in 45424?",
+          "expected_tools": ["building_tool", "solar_production_tool"],
+          "location": "45424",
+          "notes": "Building consumption with solar production analysis"
+        },
+        {
+          "query": "Building energy consumption and charging cost analysis for zip 80202",
+          "expected_tools": ["building_tool", "utility_tool"],
+          "location": "80202",
+          "notes": "Building load with EV charging cost analysis"
         }
       ]
     },
@@ -143,6 +191,42 @@
           "expected_tool": "optimization_tool",
           "location": "80202",
           "notes": "Should generate 2 sub-questions comparing financing options"
+        },
+        {
+          "query": "What's the building energy consumption, utility rates, and optimal solar size in zip 80202?",
+          "expected_tools": ["building_tool", "utility_tool", "optimization_tool"],
+          "location": "80202",
+          "notes": "Building analysis with utility rates and solar optimization"
+        },
+        {
+          "query": "Building load profile, solar production potential, and ROI analysis for Denver, CO",
+          "expected_tools": ["building_tool", "solar_production_tool", "optimization_tool"],
+          "location": "Denver, CO",
+          "notes": "Comprehensive building-to-solar analysis"
+        },
+        {
+          "query": "What's the energy consumption for my building, electricity cost, and can solar offset it in 45424?",
+          "expected_tools": ["building_tool", "utility_tool", "solar_production_tool"],
+          "location": "45424",
+          "notes": "Building consumption with cost and solar offset analysis"
+        },
+        {
+          "query": "Building load, charging stations nearby, and optimal solar system for zip 80202",
+          "expected_tools": ["building_tool", "transportation_tool", "optimization_tool"],
+          "location": "80202",
+          "notes": "Building analysis with EV charging and solar optimization"
+        },
+        {
+          "query": "Complete energy analysis: building consumption, rates, solar production, and optimal sizing in Denver",
+          "expected_tools": ["building_tool", "utility_tool", "solar_production_tool", "optimization_tool"],
+          "location": "Denver, CO",
+          "notes": "Four-tool comprehensive energy analysis"
+        },
+        {
+          "query": "What's the building energy profile and financial analysis for solar in Atlanta, GA?",
+          "expected_tools": ["building_tool", "optimization_tool"],
+          "location": "Atlanta, GA",
+          "notes": "Building profile with comprehensive financial analysis"
         }
       ]
     }

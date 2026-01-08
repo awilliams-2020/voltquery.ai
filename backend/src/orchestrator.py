@@ -301,7 +301,7 @@ TOOL USAGE:
 - utility_tool: Electricity rates, costs, time-of-use rates, utility info
 - solar_production_tool: Solar energy production estimates (kWh) for location/system size
 - buildings_tool: Building energy codes, efficiency standards, code compliance, building performance, energy efficiency measures to reduce bills
-- optimization_tool: Investment analysis, ROI, optimal sizing, NPV. MUST include location (zip/city/state/coordinates) in sub-question.
+- optimization_tool: Investment analysis, ROI, optimal sizing, NPV. MUST include location (zip/city/state/coordinates) in sub-question. CRITICAL: Preserve property type context (commercial, residential, industrial, warehouse, office, etc.) from the original question in the sub-question.
 
 TAX CREDIT CONTEXT (2026 OBBBA):
 - Residential Purchase: 0% federal tax credit (expired in 2025)
@@ -324,6 +324,9 @@ A: {{"items": [
     {{"sub_question": "What is optimal solar/storage size and NPV for zip 80202 with purchase financing (0% ITC)?", "tool_name": "optimization_tool"}},
     {{"sub_question": "What is optimal solar/storage size and NPV for zip 80202 with lease financing (30% ITC)?", "tool_name": "optimization_tool"}}
 ]}}
+
+Q: "I am planning a commercial retro-fit for a warehouse. What is the optimal solar array size and NPV?"
+A: {{"items": [{{"sub_question": "What is optimal solar/storage size and NPV for a commercial warehouse retro-fit?", "tool_name": "optimization_tool"}}]}}
 
 Q: "Should I buy or lease solar panels for my home in 2026?"
 A: {{"items": [
@@ -363,6 +366,15 @@ CRITICAL RULE FOR 2026 SOLAR ROI QUESTIONS:
   2. One for lease (30% ITC) - explicitly mention "lease" and "30% ITC" in the sub-question
 - Both sub-questions must call optimization_tool
 - The final answer will compare both scenarios: "Under 2026 rules, buying with cash is non-viable (NPV=$0), but a lease is viable (NPV=$X) because the developer keeps the 30% credit."
+
+CRITICAL RULE FOR PROPERTY TYPE CONTEXT:
+- ALWAYS preserve property type keywords from the original question in optimization sub-questions:
+  * If original mentions "commercial", "warehouse", "office", "retail", "business", "facility", "industrial" - include these in the sub-question
+  * If original mentions "residential", "home", "house", "homeowner" - include these in the sub-question
+  * Examples:
+    - Original: "commercial warehouse retro-fit" → Sub-question: "optimal solar/storage size and NPV for commercial warehouse retro-fit"
+    - Original: "20,000 sq ft warehouse" → Sub-question: "optimal solar/storage size and NPV for warehouse"
+    - Original: "my home" → Sub-question: "optimal solar/storage size and NPV for residential home"
 
 YOUR TASK:
 <Tools>
@@ -456,7 +468,8 @@ YOUR TASK:
             top_k=top_k,
             use_reranking=use_reranking,
             rerank_top_n=rerank_top_n,
-            location_filters=location_filters
+            location_filters=location_filters,
+            bcl_client=bcl_client
         )
         tools.append(buildings_tool)
         

@@ -8,8 +8,21 @@ interface ClerkProviderWrapperProps {
 }
 
 export function ClerkProviderWrapper({ children }: ClerkProviderWrapperProps) {
+  const publishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+
+  if (!publishableKey || publishableKey === "your_clerk_publishable_key_here") {
+    console.error(
+      "Clerk Error: NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is not set or is using placeholder value. " +
+      "Please set NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY in your .env file with a valid Clerk publishable key."
+    )
+    // Return children without ClerkProvider if key is missing to prevent runtime errors
+    // This allows the app to render, but authentication won't work
+    return <>{children}</>
+  }
+
   return (
     <ClerkProviderBase
+      publishableKey={publishableKey}
       appearance={{
         variables: {
           colorPrimary: "hsl(217 91% 60%)",

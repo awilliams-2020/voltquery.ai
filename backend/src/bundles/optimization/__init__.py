@@ -138,27 +138,35 @@ class OptimizationQueryEngine(BaseQueryEngine):
         
         # Check for residential keywords first (homeowner, residential, home, house)
         # These take priority over commercial keywords to avoid false positives
-        is_residential_keyword = any(keyword in query_lower for keyword in [
-            "homeowner", "home owner", "residential", "home", "house", "household",
-            "my home", "my house", "residential property"
-        ])
+        # Use word boundaries to avoid false matches (e.g., "house" matching in "warehouse")
+        residential_patterns = [
+            r'\bhomeowner\b', r'\bhome owner\b', r'\bresidential\b', r'\bhome\b', 
+            r'\bhouse\b', r'\bhousehold\b', r'\bmy home\b', r'\bmy house\b', 
+            r'\bresidential property\b'
+        ]
+        is_residential_keyword = any(re.search(pattern, query_lower) for pattern in residential_patterns)
         
         # Check for business/commercial keywords (but exclude if residential keywords present)
         # IMPORTANT: Exclude tax credit references - "commercial credit", "48e", etc. refer to tax credits, NOT property type
         # Only check for actual business property keywords, not tax credit terminology
         has_business_keywords = any(keyword in query_lower for keyword in [
-            "business", "commercial property", "industrial", "company", "corporation", 
+            "business", "commercial", "commercial property", "industrial", "company", "corporation", 
             "corp", "llc", "enterprise", "facility", "warehouse", "office",
-            "retail", "store", "shop", "restaurant"
+            "retail", "store", "shop", "restaurant", "retro-fit", "retrofit", "retro fit"
         ])
         
         # Exclude tax credit references from business detection
+        # Only exclude if "commercial" appears WITH tax credit terms, not standalone "tax credit"
         has_tax_credit_refs = any(exclude in query_lower for exclude in [
             "commercial credit", "48e", "section 48e", "commercial tax credit",
-            "section 25d", "25d", "tax credit"
+            "section 25d", "25d"
         ])
         
         is_business = not is_residential_keyword and has_business_keywords and not has_tax_credit_refs
+        
+        # Debug logging - show what we detected
+        print(f"[OptimizationTool] DEBUG: query_lower[:100]={query_lower[:100]}")
+        print(f"[OptimizationTool] DEBUG: is_residential_keyword={is_residential_keyword}, has_business_keywords={has_business_keywords}, has_tax_credit_refs={has_tax_credit_refs}, is_business={is_business}")
         
         # Check for lease keywords (including PPA and third-party)
         # For parallel scenarios, prioritize explicit keywords from orchestrator
@@ -168,8 +176,22 @@ class OptimizationQueryEngine(BaseQueryEngine):
         ])
         
         # Determine property type and ownership type based on keywords
-        # Prioritize residential keywords over commercial to avoid false positives
-        if is_residential_keyword or (not is_business and "industrial" not in query_lower):
+        # CRITICAL: Check business keywords FIRST before defaulting to residential
+        # This ensures commercial/warehouse properties are detected even if residential keywords are absent
+        if is_business:
+            # Business/commercial property detected
+            load_profile_type = "commercial"
+            property_type = "commercial"
+            if not is_lease:
+                ownership_type = "purchase"  # Business purchase still gets 30% ITC
+            else:
+                ownership_type = "lease"
+        elif "industrial" in query_lower:
+            # Industrial property
+            load_profile_type = "industrial"
+            property_type = "industrial"
+            ownership_type = "purchase" if not is_lease else "lease"
+        elif is_residential_keyword:
             # Residential property
             load_profile_type = "residential"
             property_type = "residential"
@@ -182,18 +204,6 @@ class OptimizationQueryEngine(BaseQueryEngine):
             else:
                 # Default residential to purchase (will get 0% ITC)
                 ownership_type = "purchase"
-        elif is_business:
-            load_profile_type = "commercial"
-            property_type = "commercial"
-            # Business defaults to commercial, which gets 30% ITC
-            if not is_lease:
-                ownership_type = "purchase"  # Business purchase still gets 30% ITC
-            else:
-                ownership_type = "lease"
-        elif "industrial" in query_lower:
-            load_profile_type = "industrial"
-            property_type = "industrial"
-            ownership_type = "purchase" if not is_lease else "lease"
         else:
             # Default to residential if unclear
             load_profile_type = "residential"

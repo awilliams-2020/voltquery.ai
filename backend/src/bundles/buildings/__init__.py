@@ -19,6 +19,7 @@ energy efficiency standards, and compliance requirements.
 """
 
 from typing import Optional, List
+import re
 from llama_index.core.tools import QueryEngineTool
 from llama_index.core.query_engine import RetrieverQueryEngine, BaseQueryEngine
 from llama_index.core.retrievers import VectorIndexRetriever
@@ -26,8 +27,10 @@ from llama_index.core.postprocessor import LLMRerank
 from llama_index.core.callbacks import CallbackManager
 from llama_index.core.vector_stores import MetadataFilter, MetadataFilters, FilterOperator
 from llama_index.core.base.response.schema import Response
-from llama_index.core.schema import QueryBundle
+from llama_index.core.schema import QueryBundle, TextNode, NodeWithScore
 from app.services.vector_store_service import VectorStoreService
+from app.services.bcl_client import BCLClient
+from app.services.freshness_checker import FreshnessChecker
 
 
 def get_tool(
@@ -37,13 +40,14 @@ def get_tool(
     top_k: int = 5,
     use_reranking: bool = False,
     rerank_top_n: int = 3,
-    location_filters: Optional[List[MetadataFilter]] = None
+    location_filters: Optional[List[MetadataFilter]] = None,
+    bcl_client: Optional[BCLClient] = None
 ) -> QueryEngineTool:
     """
     Get the buildings tool as a QueryEngineTool.
     
     This tool provides building energy code, efficiency standards, and compliance queries
-    using the vector store index.
+    using the vector store index with BCL API fallback.
     
     Args:
         llm: LLM instance for query processing
@@ -53,6 +57,7 @@ def get_tool(
         use_reranking: Whether to use LLM reranking
         rerank_top_n: Number of results to rerank if reranking is enabled
         location_filters: Optional location-based metadata filters
+        bcl_client: Optional BCL client for API fallback (creates new if not provided)
         
     Returns:
         QueryEngineTool configured for buildings/energy code queries
@@ -136,18 +141,168 @@ def get_tool(
         response_synthesizer=buildings_response_synthesizer
     )
     
-    # Wrap query engine to investigate empty responses
+    # Initialize BCL client for fallback fetching
+    if bcl_client is None:
+        bcl_client = BCLClient()
+    
+    # Initialize freshness checker
+    from app.services.rag_settings import RAGSettings
+    settings = RAGSettings()
+    freshness_checker = FreshnessChecker(vector_store_service, settings)
+    
+    # Wrap query engine to add BCL API fallback with freshness checking
     class BuildingsQueryEngineWrapper(BaseQueryEngine):
-        """Wrapper to investigate empty responses from buildings query engine."""
+        """Wrapper to add BCL API fallback with freshness checking for buildings query engine."""
         
-        def __init__(self, base_engine, retriever, callback_manager=None):
+        def __init__(self, base_engine, retriever, bcl_client, vector_store_service, freshness_checker, callback_manager=None):
             super().__init__(callback_manager=callback_manager)
             self.base_engine = base_engine
             self.retriever = retriever
+            self.bcl_client = bcl_client
+            self.vector_store_service = vector_store_service
+            self.freshness_checker = freshness_checker
         
         def _get_prompt_modules(self):
             """Get prompt sub-modules. Returns empty dict since we delegate to base engine."""
             return {}
+        
+        def _extract_state_from_query(self, query_str: str) -> Optional[str]:
+            """Extract state code from query string."""
+            # Try to extract state code (2 uppercase letters)
+            state_match = re.search(r'\b([A-Z]{2})\b', query_str)
+            if state_match:
+                return state_match.group(1)
+            
+            # Try to extract state name and convert to code
+            # Common state name patterns
+            state_names = {
+                "alabama": "AL", "alaska": "AK", "arizona": "AZ", "arkansas": "AR",
+                "california": "CA", "colorado": "CO", "connecticut": "CT", "delaware": "DE",
+                "florida": "FL", "georgia": "GA", "hawaii": "HI", "idaho": "ID",
+                "illinois": "IL", "indiana": "IN", "iowa": "IA", "kansas": "KS",
+                "kentucky": "KY", "louisiana": "LA", "maine": "ME", "maryland": "MD",
+                "massachusetts": "MA", "michigan": "MI", "minnesota": "MN", "mississippi": "MS",
+                "missouri": "MO", "montana": "MT", "nebraska": "NE", "nevada": "NV",
+                "new hampshire": "NH", "new jersey": "NJ", "new mexico": "NM", "new york": "NY",
+                "north carolina": "NC", "north dakota": "ND", "ohio": "OH", "oklahoma": "OK",
+                "oregon": "OR", "pennsylvania": "PA", "rhode island": "RI", "south carolina": "SC",
+                "south dakota": "SD", "tennessee": "TN", "texas": "TX", "utah": "UT",
+                "vermont": "VT", "virginia": "VA", "washington": "WA", "west virginia": "WV",
+                "wisconsin": "WI", "wyoming": "WY", "district of columbia": "DC"
+            }
+            
+            query_lower = query_str.lower()
+            for state_name, state_code in state_names.items():
+                if state_name in query_lower:
+                    return state_code
+            
+            return None
+        
+        async def _fetch_from_bcl_api(self, query_str: str, state: Optional[str] = None) -> Optional[str]:
+            """Fetch building codes and efficiency measures from BCL API."""
+            try:
+                from app.services.document_service import DocumentService
+                document_service = DocumentService()
+                
+                # Extract key terms from query for better search
+                search_query = None
+                query_lower = query_str.lower()
+                keywords = []
+                if any(term in query_lower for term in ["code", "standard", "compliance", "iecc", "ashrae"]):
+                    keywords.append("energy code")
+                if any(term in query_lower for term in ["efficiency", "retrofit", "improve", "reduce", "lower"]):
+                    keywords.append("energy efficiency")
+                if any(term in query_lower for term in ["building", "residential", "home"]):
+                    keywords.append("residential")
+                
+                # Use first keyword or original query
+                search_query = keywords[0] if keywords else query_str[:50]  # Limit query length
+                
+                # Search for building code measures
+                print(f"[BuildingsTool] bcl_api_call | type=building_codes | query='{search_query[:50] if search_query else 'N/A'}' | state={state}")
+                building_codes = await self.bcl_client.search_building_codes(
+                    query=search_query,
+                    limit=10
+                )
+                
+                # Search for energy efficiency measures
+                print(f"[BuildingsTool] bcl_api_call | type=efficiency_measures | query='{search_query[:50] if search_query else 'N/A'}' | state={state}")
+                efficiency_measures = await self.bcl_client.search_energy_efficiency_measures(
+                    query=search_query,
+                    limit=10
+                )
+                
+                # Combine results
+                all_measures = []
+                if building_codes:
+                    all_measures.extend(building_codes)
+                if efficiency_measures:
+                    all_measures.extend(efficiency_measures)
+                
+                # Remove duplicates by UUID
+                seen_uuids = set()
+                unique_measures = []
+                for measure in all_measures:
+                    uuid = measure.get("uuid") or measure.get("version_id")
+                    if uuid and uuid not in seen_uuids:
+                        seen_uuids.add(uuid)
+                        unique_measures.append(measure)
+                
+                if not unique_measures:
+                    return None
+                
+                # Convert to documents
+                documents = document_service.bcl_measures_to_documents(
+                    measures=unique_measures,
+                    state=state
+                )
+                
+                if not documents or len(documents) == 0:
+                    return None
+                
+                # Index the fetched documents to vector store for future queries
+                try:
+                    index = self.vector_store_service.get_index()
+                    # Use bulk insert if available
+                    if hasattr(index, 'insert_nodes'):
+                        from llama_index.core.node_parser import SimpleNodeParser
+                        node_parser = SimpleNodeParser.from_defaults()
+                        nodes = node_parser.get_nodes_from_documents(documents)
+                        if nodes:
+                            index.insert_nodes(nodes)
+                    else:
+                        # Fallback to individual inserts
+                        for doc in documents:
+                            try:
+                                index.insert(doc)
+                            except Exception:
+                                pass
+                    print(f"[BuildingsTool] indexed_bcl_data | state={state} | documents={len(documents)}")
+                except Exception as index_error:
+                    # Don't fail the query if indexing fails - just log it
+                    print(f"[BuildingsTool] WARNING indexing_failed | state={state} | error={str(index_error)[:100]}")
+                
+                # Extract formatted text from documents
+                formatted_texts = []
+                for doc in documents[:5]:  # Limit to top 5 measures
+                    doc_text = doc.text if hasattr(doc, 'text') else str(doc)
+                    metadata = doc.metadata if hasattr(doc, 'metadata') else {}
+                    measure_name = metadata.get('name', 'Unknown Measure')
+                    
+                    # Build summary
+                    summary = f"{measure_name}: {doc_text[:200]}..."
+                    formatted_texts.append(summary)
+                
+                if formatted_texts:
+                    return "Building energy codes and efficiency measures:\n" + "\n\n".join(formatted_texts)
+                
+                return None
+                
+            except Exception as e:
+                print(f"[BuildingsTool] ERROR fetching from BCL: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                return None
         
         def _query(self, query_bundle: QueryBundle) -> Response:
             """Synchronous query - delegate to base engine."""
@@ -170,7 +325,7 @@ def get_tool(
             # Check if we have nodes before querying
             nodes = self.retriever.retrieve(query_str)
             if not nodes or len(nodes) == 0:
-                print(f"[BuildingsTool] no_nodes | returning_empty_response")
+                print(f"[BuildingsTool] no_nodes | sync_query | cannot_fetch_async")
                 empty_response = Response(
                     response="I do not have building energy code or efficiency standard data available. The data may not be available in the database, or building codes may need to be indexed first.",
                     source_nodes=[],
@@ -239,9 +394,84 @@ def get_tool(
                 import traceback
                 traceback.print_exc()
             
+            # Extract state from query for BCL API fallback
+            queried_state = self._extract_state_from_query(query_str)
+            
             # Check if we have nodes before querying
             if not nodes or len(nodes) == 0:
-                print(f"[BuildingsTool] no_nodes | returning_empty_response")
+                print(f"[BuildingsTool] no_nodes | checking_freshness | state={queried_state}")
+                
+                # Check freshness before fetching from API
+                should_fetch = False
+                if queried_state:
+                    # First check if we have ANY building data (to detect state mismatches)
+                    has_any_building_data = False
+                    try:
+                        from llama_index.core.retrievers import VectorIndexRetriever
+                        from llama_index.core.vector_stores import MetadataFilter, MetadataFilters, FilterOperator
+                        any_state_retriever = VectorIndexRetriever(
+                            index=self.retriever._index if hasattr(self.retriever, '_index') else None,
+                            similarity_top_k=1,
+                            filters=MetadataFilters(filters=[
+                                MetadataFilter(key="domain", value="buildings", operator=FilterOperator.EQ)
+                            ])
+                        )
+                        any_nodes = any_state_retriever.retrieve("building code")
+                        has_any_building_data = any_nodes and len(any_nodes) > 0
+                        if has_any_building_data:
+                            # Check what state(s) we have data for
+                            existing_states = set()
+                            for node in any_nodes[:5]:  # Check first 5 nodes
+                                if hasattr(node, 'metadata'):
+                                    node_state = node.metadata.get('state')
+                                    if node_state:
+                                        existing_states.add(node_state)
+                            if existing_states and queried_state not in existing_states:
+                                print(f"[BuildingsTool] state_mismatch | queried={queried_state} | existing={','.join(existing_states)} | fetching_for_queried_state")
+                    except Exception as e:
+                        print(f"[BuildingsTool] ERROR checking any building data: {str(e)}")
+                    
+                    # Check freshness for this specific state
+                    is_fresh, indexed_at = await self.freshness_checker.check_bcl_measures_freshness(queried_state)
+                    if not is_fresh:
+                        if indexed_at:
+                            print(f"[BuildingsTool] freshness_check | state={queried_state} | source=vector_store | stale=true")
+                        else:
+                            if has_any_building_data:
+                                print(f"[BuildingsTool] freshness_check | state={queried_state} | source=vector_store | found=false | state_mismatch")
+                            else:
+                                print(f"[BuildingsTool] freshness_check | state={queried_state} | source=vector_store | found=false | no_building_data")
+                        should_fetch = True
+                    else:
+                        print(f"[BuildingsTool] freshness_check | state={queried_state} | source=vector_store | fresh=true")
+                else:
+                    # No state specified - fetch anyway (can't check freshness without state)
+                    should_fetch = True
+                
+                # Try fetching from BCL API as fallback if data is stale or doesn't exist
+                if should_fetch:
+                    print(f"[BuildingsTool] attempting_bcl_fallback | state={queried_state}")
+                    if queried_state:
+                        bcl_response = await self._fetch_from_bcl_api(query_str, state=queried_state)
+                        if bcl_response:
+                            node = TextNode(text=bcl_response)
+                            node_with_score = NodeWithScore(node=node, score=1.0)
+                            return Response(
+                                response=bcl_response,
+                                source_nodes=[node_with_score]
+                            )
+                    else:
+                        # Try without state filter
+                        bcl_response = await self._fetch_from_bcl_api(query_str, state=None)
+                        if bcl_response:
+                            node = TextNode(text=bcl_response)
+                            node_with_score = NodeWithScore(node=node, score=1.0)
+                            return Response(
+                                response=bcl_response,
+                                source_nodes=[node_with_score]
+                            )
+                
+                print(f"[BuildingsTool] no_nodes | bcl_fallback_failed | returning_empty_response")
                 empty_response = Response(
                     response="I do not have building energy code or efficiency standard data available. The data may not be available in the database, or building codes may need to be indexed first.",
                     source_nodes=[],
@@ -261,6 +491,78 @@ def get_tool(
                     response_text = response.text if response.text else ""
                 
                 if not response_text or response_text.strip() == "" or response_text.strip() == "Empty Response":
+                    if not (hasattr(response, 'source_nodes') and response.source_nodes and len(response.source_nodes) > 0):
+                        print(f"[BuildingsTool] empty_response | no_source_nodes | checking_freshness")
+                        
+                        # Check freshness before fetching from API
+                        should_fetch = False
+                        if queried_state:
+                            # First check if we have ANY building data (to detect state mismatches)
+                            has_any_building_data = False
+                            try:
+                                from llama_index.core.retrievers import VectorIndexRetriever
+                                from llama_index.core.vector_stores import MetadataFilter, MetadataFilters, FilterOperator
+                                any_state_retriever = VectorIndexRetriever(
+                                    index=self.retriever._index if hasattr(self.retriever, '_index') else None,
+                                    similarity_top_k=1,
+                                    filters=MetadataFilters(filters=[
+                                        MetadataFilter(key="domain", value="buildings", operator=FilterOperator.EQ)
+                                    ])
+                                )
+                                any_nodes = any_state_retriever.retrieve("building code")
+                                has_any_building_data = any_nodes and len(any_nodes) > 0
+                                if has_any_building_data:
+                                    # Check what state(s) we have data for
+                                    existing_states = set()
+                                    for node in any_nodes[:5]:  # Check first 5 nodes
+                                        if hasattr(node, 'metadata'):
+                                            node_state = node.metadata.get('state')
+                                            if node_state:
+                                                existing_states.add(node_state)
+                                    if existing_states and queried_state not in existing_states:
+                                        print(f"[BuildingsTool] state_mismatch | queried={queried_state} | existing={','.join(existing_states)} | fetching_for_queried_state")
+                            except Exception as e:
+                                print(f"[BuildingsTool] ERROR checking any building data: {str(e)}")
+                            
+                            is_fresh, indexed_at = await self.freshness_checker.check_bcl_measures_freshness(queried_state)
+                            if not is_fresh:
+                                if indexed_at:
+                                    print(f"[BuildingsTool] freshness_check | state={queried_state} | source=vector_store | stale=true")
+                                else:
+                                    if has_any_building_data:
+                                        print(f"[BuildingsTool] freshness_check | state={queried_state} | source=vector_store | found=false | state_mismatch")
+                                    else:
+                                        print(f"[BuildingsTool] freshness_check | state={queried_state} | source=vector_store | found=false | no_building_data")
+                                should_fetch = True
+                            else:
+                                print(f"[BuildingsTool] freshness_check | state={queried_state} | source=vector_store | fresh=true")
+                        else:
+                            # No state specified - fetch anyway
+                            should_fetch = True
+                        
+                        # Try fetching from BCL API as fallback if data is stale or doesn't exist
+                        if should_fetch:
+                            print(f"[BuildingsTool] attempting_bcl_fallback | state={queried_state}")
+                            if queried_state:
+                                bcl_response = await self._fetch_from_bcl_api(query_str, state=queried_state)
+                                if bcl_response:
+                                    node = TextNode(text=bcl_response)
+                                    node_with_score = NodeWithScore(node=node, score=1.0)
+                                    return Response(
+                                        response=bcl_response,
+                                        source_nodes=[node_with_score]
+                                    )
+                            else:
+                                # Try without state filter
+                                bcl_response = await self._fetch_from_bcl_api(query_str, state=None)
+                                if bcl_response:
+                                    node = TextNode(text=bcl_response)
+                                    node_with_score = NodeWithScore(node=node, score=1.0)
+                                    return Response(
+                                        response=bcl_response,
+                                        source_nodes=[node_with_score]
+                                    )
+                    
                     print(f"[BuildingsTool] empty_response | creating_helpful_message")
                     helpful_response = Response(
                         response="I do not have building energy code or efficiency standard data available. The data may not be available in the database, or building codes may need to be indexed first.",
@@ -281,6 +583,9 @@ def get_tool(
     wrapped_engine = BuildingsQueryEngineWrapper(
         base_query_engine, 
         buildings_retriever,
+        bcl_client,
+        vector_store_service,
+        freshness_checker,
         callback_manager=callback_manager
     )
     
