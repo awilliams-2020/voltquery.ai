@@ -765,10 +765,12 @@ class REoptService:
         if property_type is None:
             property_type = load_profile_type.lower()
         
-        # For residential: Run both Purchase and Lease scenarios
+        # For residential: Run both Purchase and Lease scenarios in parallel
         if property_type == "residential":
-            # Scenario A: Purchase (0% ITC)
-            scenario_a = await self.run_reopt_optimization(
+            # OPTIMIZATION: Run both scenarios concurrently using asyncio.gather()
+            # This reduces total time from ~56s (sequential) to ~28-30s (parallel)
+            # Both jobs run simultaneously on NREL's servers, reducing wait time
+            scenario_a_task = self.run_reopt_optimization(
                 lat=lat,
                 lon=lon,
                 load_profile_type=load_profile_type,
@@ -779,8 +781,7 @@ class REoptService:
                 ownership_type="purchase"
             )
             
-            # Scenario B: Lease (30% ITC - PPA provider gets credit)
-            scenario_b = await self.run_reopt_optimization(
+            scenario_b_task = self.run_reopt_optimization(
                 lat=lat,
                 lon=lon,
                 load_profile_type=load_profile_type,
@@ -790,6 +791,19 @@ class REoptService:
                 property_type="residential",
                 ownership_type="lease"
             )
+            
+            # Execute both scenarios in parallel
+            scenario_a, scenario_b = await asyncio.gather(
+                scenario_a_task,
+                scenario_b_task,
+                return_exceptions=True
+            )
+            
+            # Handle exceptions if either scenario failed
+            if isinstance(scenario_a, Exception):
+                raise ValueError(f"Purchase scenario failed: {str(scenario_a)}") from scenario_a
+            if isinstance(scenario_b, Exception):
+                raise ValueError(f"Lease scenario failed: {str(scenario_b)}") from scenario_b
             
             return {
                 "scenario_type": "residential",

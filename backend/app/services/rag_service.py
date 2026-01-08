@@ -1601,6 +1601,8 @@ class RAGService:
             await asyncio.sleep(0)  # Yield control to allow status update to be sent
             
             # Build final response
+            response_time_ms = (time.time() - query_start_time) * 1000
+            
             response_data = {
                 "question": question,
                 "answer": answer_text if answer_text else "I couldn't generate a response. Please try rephrasing your question.",
@@ -1631,7 +1633,7 @@ class RAGService:
                 response_data["utility_rates"] = utility_rates_info
             
             # Log query completion
-            response_time_ms = (time.time() - query_start_time) * 1000
+            
             self.logger.log_query(
                 question=question,
                 tools_used=tools_used,
@@ -1657,6 +1659,7 @@ class RAGService:
         except Exception as e:
             error_msg = str(e)
             response_time_ms = (time.time() - query_start_time) * 1000
+            
             self.logger.log_error(
                 error_type=type(e).__name__,
                 error_message=error_msg,
